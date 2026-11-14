@@ -1,6 +1,7 @@
 import { HAZARD_KINDS, useMission } from '../context/MissionContext.jsx';
 import { useNavigation } from '../context/NavigationContext.jsx';
 import { useTelemetry } from '../context/TelemetryContext.jsx';
+import { useDecision } from '../context/DecisionContext.jsx';
 import { useUi } from '../context/UiContext.jsx';
 import { Icon } from '../lib/icons.jsx';
 import { Menu, MenuItem, PageHead, Seg, Stat } from '../lib/ui.jsx';
@@ -24,12 +25,15 @@ const COPY = {
 
 function Glance() {
   const n = useNavigation();
+  const d = useDecision();
+  const score = d?.safetyScore;
   return (
     <section className="grid grid-cols-2 gap-2.5" aria-label="Route at a glance">
       <Stat label="Distance" value={`${n.metrics.distanceKm} km`} sub={`${n.stations.length} stations`} />
       <Stat label="Walking time" value={n.metrics.estimatedTimeFormatted} sub={`${n.traveledKm.toFixed(2)} km walked`} />
       <Stat label="Max slope" value={`${(n.metrics.maxSlope || 0).toFixed(1)}°`} sub="limit 15°" color={n.metrics.maxSlope > 15 ? hex.hazard : undefined} />
       <Stat label="O₂ now" value={`${n.plss.o2RemainingPercent}%`} sub={n.plss.o2EnduranceFormatted} color={n.plss.o2RemainingPercent < 25 ? hex.hazard : hex.sol} />
+      {score != null && <Stat label="Safety score" value={`${score}`} sub={d.decision || 'decision engine'} color={d.decision === 'NO_GO' ? hex.hazard : d.decision === 'CAUTION' ? hex.butter : hex.sol} />}
     </section>
   );
 }

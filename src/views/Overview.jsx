@@ -7,8 +7,8 @@ import { PageHead, Stat } from '../lib/ui.jsx';
 const STEPS = [
   ['user', 'You are here', 'Astronaut position is the origin for every route, chart and life-support number.'],
   ['route', 'Route solver', 'A* from your position: safest, fastest, or science-weighted.'],
-  ['shield', 'Safe return', 'Walk-back is a routed path with a 45 min O₂ reserve, not a circle.'],
-  ['alert', 'Closed loop', 'Move, sample terrain, burn PLSS, update HUD and charts, then re-plan.']
+  ['shield', 'Decision engine', 'Backend scores terrain, hazards and consumables, then returns GO / CAUTION / NO-GO.'],
+  ['alert', 'Closed loop', 'Move, burn PLSS, report a hazard, re-solve the path, and re-score the mission.']
 ];
 const LIVE = [
   ['Real NASA data', 'Atlas imagery and elevation, science target names and spectral classes.'],

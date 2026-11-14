@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { MissionProvider } from './context/MissionContext.jsx';
 import { NavigationProvider } from './context/NavigationContext.jsx';
 import { TelemetryProvider } from './context/TelemetryContext.jsx';
+import { DecisionProvider } from './context/DecisionContext.jsx';
 import { UiProvider, useUi } from './context/UiContext.jsx';
 import { Briefing, Header, Nav } from './components/Shell.jsx';
 import Explorer from './views/Explorer.jsx';
@@ -52,6 +53,6 @@ function Shell() {
 
 export default function App() {
   return (
-    <MissionProvider><NavigationProvider><TelemetryProvider><UiProvider><Shell /></UiProvider></TelemetryProvider></NavigationProvider></MissionProvider>
+    <MissionProvider><NavigationProvider><TelemetryProvider><DecisionProvider><UiProvider><Shell /></UiProvider></DecisionProvider></TelemetryProvider></NavigationProvider></MissionProvider>
   );
 }

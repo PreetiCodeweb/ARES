@@ -3,50 +3,79 @@
 ## Requirements
 
 - Node.js 18+
+- Python 3.11+
 - npm
 - A browser with WebGL
 - Internet access for NASA Mars Trek imagery and marshub terrain
 
-## Install and run
-
-From the `Frontend` folder:
+## Frontend
 
 ```bash
 npm install
 npm run dev
 ```
 
-Vite serves the app at **http://localhost:5173/** (or the next free port).
+Vite serves **http://localhost:5173/** (`host: true`). `/api` and `/health` proxy to `http://127.0.0.1:8000`.
 
-| Script | Command | Result |
-| --- | --- | --- |
-| Dev | `npm run dev` | Vite on port 5173, `host: true` |
-| Production build | `npm run build` | `dist/` plus precompressed `.br` / `.gz` |
-| Preview build | `npm run preview` | Serve `dist/` locally |
+| Script | Result |
+| --- | --- |
+| `npm run dev` | Vite on port 5173 |
+| `npm run build` | `dist/` plus precompressed `.br` / `.gz` |
+| `npm run preview` | Serve `dist/` locally |
 
 `vite.config.js` has two HTML entries: `index.html` (ARES shell) and `mars-atlas.html` (globe). Both must stay in the build so the iframe works in production.
+
+## Backend
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+| URL | What |
+| --- | --- |
+| http://127.0.0.1:8000/health | `{ status: online, service: ARES Mission Backend }` |
+| http://127.0.0.1:8000/docs | Swagger UI |
+| http://127.0.0.1:8000/api/missions | Mission create / list |
+
+```bash
+cd backend && source .venv/bin/activate && pytest -q
+```
+
+## Environment
+
+| Name | Where | Default |
+| --- | --- | --- |
+| `VITE_API_URL` | Frontend build | empty (relative `/api` via Vite proxy) |
+| `ENVIRONMENT` | Backend | `development` |
+| `DATABASE_URL` | Backend | `sqlite:///./ares.db` |
+| `CORS_ORIGINS` | Backend | localhost Vite ports |
 
 ## Important URLs
 
 | URL | What |
 | --- | --- |
 | `/` | ARES mission control + navigation |
-| `/mars-atlas.html` | Globe standalone (full atlas chrome) |
-| `/mars-atlas.html` in an iframe | Embedded mode: chrome hidden, ARES overlay on |
+| `/mars-atlas.html` | Globe standalone |
+| `/mars-atlas.html` in an iframe | Embedded mode |
 
 ## Demo story (Jezero)
 
-The default mission is Jezero Crater, habitat **Ares Base Alpha**.
+Default site: Jezero Crater, habitat **Ares Base Alpha**.
 
 1. Dismiss the briefing (Enter).
-2. Confirm the header shows **Return nominal** and the HUD shows your lat/lon at the habitat.
-3. Click **Locate astronaut** — the globe frames you.
-4. Open **Science targets** and click **Navigate here** on Skinner Ridge (or click the globe).
-5. Compare **Safest / Fastest / Science** on the explorer. Keep Safest.
-6. Click **Begin EVA**. Marker, profile, terrain-ahead, O₂, and ETA should all move together.
-7. Use **Report hazard** mid-walk. After validation the route re-solves from the last origin / current dest.
-8. Watch **Safe return**. If margin drops, click **Return to base**.
-9. Switch camera to **Astronaut** for a heading-up follow view. Use **Walk** + WASD for manual motion.
+2. Header shows **Return nominal**. HUD shows lat/lon at the habitat. Sidebar **Engine** should read Online once FastAPI is up.
+3. **Locate astronaut** — the globe frames you.
+4. Open **Science targets** and **Navigate here** on Skinner Ridge (or click the globe).
+5. Wait for **Mission analysis** in the Go / No-Go card: safety score and GO / CAUTION / NO-GO.
+6. Compare **Safest / Fastest / Science**. Keep Safest if the engine recommends it.
+7. **Begin EVA**. Marker, profile, terrain-ahead, O₂, and ETA move together. Telemetry posts in the background.
+8. **Report hazard** mid-walk. After validation the route re-solves. If the engine returns `REROUTE REQUIRED`, Direct mode switches to Safe.
+9. Watch **Safe return**. If margin drops, **Return to base**.
+10. Camera **Astronaut** for a heading-up follow view. **Walk** + WASD for manual motion.
 
 ## Keyboard
 
@@ -58,5 +87,3 @@ The default mission is Jezero Crater, habitat **Ares Base Alpha**.
 | D / → | Turn right |
 | Ctrl/Cmd K or `/` | Command palette |
 | Enter / Esc | Skip first-run briefing |
-
-Palette actions include Locate astronaut, Return to base, and Walk mode.

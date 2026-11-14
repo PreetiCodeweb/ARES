@@ -13,10 +13,14 @@ ROUTE SOLVER  (safe | direct | science) from routeOrigin → dest
         ↓
 ROUTE GEOMETRY (tactical pixels, densified ~8 px)
         ↓
-ANALYSIS
+ANALYSIS (browser)
   elevation profile     ← active path + you marker
   terrain ahead         ← samples forward of idx
   next GPS instruction  ← heading + remaining km
+        ↓
+DECISION ENGINE (FastAPI)
+  POST /api/navigation/analyze  ← metrics + waypoints + O₂/battery
+  GO / CAUTION / NO-GO + safety_score + reasons
         ↓
 MOVEMENT
   Walk: WASD / stick, speed × slope/hazard factor
@@ -79,3 +83,6 @@ Idle life support still drains slowly so a stopped crew is not frozen in time.
 - Envelope keyed to ~16 px bins + O₂ budget
 - Cesium gets `ares:you` for pose and `ares:state` for overlays
 - Explorer stays mounted so the iframe is not reloaded
+- Analyze is debounced (~280 ms) after dest / mode / hazard changes
+- Telemetry posts every 2.5 s while EVA follow is running
+- Hazard reports call `POST /api/navigation/hazard`; if `route_affected`, the existing A* re-solve is the replacement path

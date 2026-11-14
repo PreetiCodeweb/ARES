@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMission } from '../context/MissionContext.jsx';
 import { useNavigation } from '../context/NavigationContext.jsx';
 import { useTelemetry } from '../context/TelemetryContext.jsx';
+import { useDecision } from '../context/DecisionContext.jsx';
 import { useUi } from '../context/UiContext.jsx';
 import { Icon } from '../lib/icons.jsx';
 import { hm, hex } from '../lib/fmt.js';
@@ -37,6 +38,7 @@ export function Verdict({ onBrief }) {
         </div>
         <div className="flex flex-col items-end gap-2"><span className="tag tag-info">Plan v{planVersion}</span>{revalidating && <span className="tag tag-caution live">Revalidating</span>}</div>
       </div>
+      <MissionAnalysis />
       {needs.length > 0 && <CheckList checks={needs} />}
       {a.state === 'hold' && routeMode === 'direct' && <button className="btn" onClick={() => setRouteMode('safe')}><Icon n="shield" />Switch to Safe path</button>}
       {ok.length > 0 && (
@@ -52,6 +54,47 @@ export function Verdict({ onBrief }) {
         <button className="btn btn-pri" onClick={onBrief}><Icon n="file" s={15} />EVA brief</button>
       </div>
     </section>
+  );
+}
+
+const DEC = { GO: 'tag-go', CAUTION: 'tag-caution', NO_GO: 'tag-hold', REROUTE_REQUIRED: 'tag-caution' };
+
+function MissionAnalysis() {
+  const d = useDecision();
+  const n = useNavigation();
+  const a = d?.analysis;
+  if (!d?.engineOnline && !a) {
+    return <p className="text-xs text-dim">Decision engine offline. Local Go/No-Go still applies.</p>;
+  }
+  if (!a) {
+    return <p className="text-xs text-dust">{d?.analyzing ? 'Scoring the live route…' : n.destination ? 'Waiting for mission analysis.' : 'Pick a destination to run mission analysis.'}</p>;
+  }
+  const dec = a.decision || {};
+  const status = d.hazardAlert?.route_affected ? 'REROUTE_REQUIRED' : (d.telemetry?.decision || dec.status);
+  const reasons = d.hazardAlert?.route_affected ? [d.hazardAlert.message, ...(d.hazardAlert.reasons || [])] : (dec.reason || []);
+  return (
+    <div className="well p-3 flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="label">Mission analysis</div>
+        <span className={`tag ${DEC[status] || 'tag-info'}`}>{String(status).replace(/_/g, ' ')}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-[13px]">
+        <div><div className="text-dust text-xs">Distance</div><div className="num font-semibold">{a.route.distance_km} km</div></div>
+        <div><div className="text-dust text-xs">Estimated time</div><div className="num font-semibold">{a.route.estimated_duration_minutes} min</div></div>
+        <div><div className="text-dust text-xs">Hazards</div><div className="num font-semibold">{a.hazards.count}</div></div>
+        <div><div className="text-dust text-xs">Max slope</div><div className="num font-semibold">{a.terrain.max_slope}°</div></div>
+      </div>
+      <div className="flex items-baseline justify-between">
+        <span className="text-xs text-dust">Safety score</span>
+        <span className="num font-semibold">{dec.safety_score}/100</span>
+      </div>
+      <ul className="flex flex-col gap-1">
+        {reasons.slice(0, 4).map((r) => (
+          <li key={r} className="text-xs text-dust">· {r}</li>
+        ))}
+      </ul>
+      {d.missionId && <div className="text-[11px] text-dim num">{d.missionId}{d.telemetry ? ` · O₂ ${d.telemetry.oxygen}%` : ''}</div>}
+    </div>
   );
 }
 

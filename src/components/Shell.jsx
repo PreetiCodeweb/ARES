@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react';
 import { MISSIONS, useMission } from '../context/MissionContext.jsx';
 import { useNavigation } from '../context/NavigationContext.jsx';
+import { useDecision } from '../context/DecisionContext.jsx';
 import { ROLES, useUi } from '../context/UiContext.jsx';
 import { useLmst, useOnline } from '../hooks/useClock.js';
 import { Icon } from '../lib/icons.jsx';
@@ -66,7 +67,9 @@ export function Header() {
 export function Nav() {
   const { view, setView } = useUi();
   const { assessment: a, planVersion, routeMode, hazards } = useMission();
+  const d = useDecision();
   const tag = { go: 'tag-go', caution: 'tag-caution', hold: 'tag-hold' }[a.state];
+  const engineTag = { GO: 'tag-go', CAUTION: 'tag-caution', NO_GO: 'tag-hold', REROUTE_REQUIRED: 'tag-caution' }[d?.decision] || (d?.engineOnline ? 'tag-info' : 'tag-caution');
   return (
     <>
       <aside className="hidden lg:flex w-56 shrink-0 flex-col justify-between p-3 border-r border-line bg-basalt">
@@ -82,6 +85,7 @@ export function Nav() {
         <div className="well p-3.5 flex flex-col gap-2">
           <div className="flex items-center justify-between"><span className="label">Plan</span><span className={`tag ${tag}`}>{a.headline}</span></div>
           <div className="text-xs text-dust leading-relaxed">v{planVersion} · {routeMode === 'safe' ? 'Safe path' : routeMode === 'direct' ? 'Direct' : 'Science max'}<br />{hazards.length} reported hazard{hazards.length === 1 ? '' : 's'}</div>
+          <div className="flex items-center justify-between pt-1 border-t border-line"><span className="label">Engine</span><span className={`tag ${engineTag}`}>{d?.decision ? String(d.decision).replace(/_/g, ' ') : d?.engineOnline ? 'Online' : 'Offline'}</span></div>
         </div>
       </aside>
       <nav aria-label="Workspace" className="lg:hidden fixed bottom-0 inset-x-0 z-40 grid grid-cols-6 border-t border-line bg-basalt/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">

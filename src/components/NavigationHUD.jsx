@@ -1,5 +1,6 @@
 import { useMission } from '../context/MissionContext.jsx';
 import { useNavigation } from '../context/NavigationContext.jsx';
+import { useDecision } from '../context/DecisionContext.jsx';
 import { useUi } from '../context/UiContext.jsx';
 import { Icon } from '../lib/icons.jsx';
 import { hex } from '../lib/fmt.js';
@@ -91,24 +92,31 @@ function WalkStick({ value, onChange }) {
 export function RouteComparison() {
   const m = useMission();
   const n = useNavigation();
+  const d = useDecision();
   if (!n.comparisons) return null;
   const rows = [
     ['safe', 'Safest', 'Low slope, avoid hazards, keep return margin'],
     ['direct', 'Fastest', 'Shortest time; still penalises severe hazards'],
     ['science', 'Science', 'Detours through nearby high-value targets']
   ];
+  const scored = Object.fromEntries((d?.comparison?.routes || []).map((r) => [r.type, r]));
+  const rec = d?.comparison?.recommended_route;
   return (
     <section className="card p-4">
-      <div className="flex items-center justify-between mb-3"><h2 className="font-semibold text-[15px]">Route options</h2><span className="text-xs text-dust">from your position</span></div>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-semibold text-[15px]">Route options</h2>
+        <span className="text-xs text-dust">{rec ? `engine: ${rec}` : 'from your position'}</span>
+      </div>
       <div className="flex flex-col gap-2">
         {rows.map(([id, label, hint]) => {
           const r = n.comparisons[id];
           const on = m.routeMode === id;
+          const s = scored[id.toUpperCase()] || scored[id === 'direct' ? 'DIRECT' : id.toUpperCase()];
           return (
             <button key={id} onClick={() => m.setRouteMode(id)} className={`well p-3 text-left ${on ? '!border-dusk/50' : ''}`}>
               <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-[13px]">{label}</span>
-                <span className="num text-xs text-dust">{r?.metrics?.distanceKm ?? '—'} km · {r?.metrics?.estimatedTimeFormatted || ''}</span>
+                <span className="font-semibold text-[13px]">{label}{rec === id.toUpperCase() ? ' · recommended' : ''}</span>
+                <span className="num text-xs text-dust">{r?.metrics?.distanceKm ?? '—'} km · {r?.metrics?.estimatedTimeFormatted || ''}{s ? ` · ${s.safety_score}` : ''}</span>
               </div>
               <div className="text-xs text-dust mt-1">{hint} · max slope {(r?.metrics?.maxSlope || 0).toFixed(1)}°</div>
             </button>

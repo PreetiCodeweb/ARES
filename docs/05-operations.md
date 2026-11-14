@@ -1,99 +1,69 @@
 # Runtime operations
 
-There is no server-side backend. These are the in-browser services that run while the app is open.
+Two processes: Vite (UI + solvers) and FastAPI (decision engine). If the engine is down, the UI still plans, walks, and scores locally.
 
-## 1. Mission plan (existing)
+## 1. Mission plan (browser)
 
 On waypoint, mode, or validated-hazard change:
 
 ```
 waypoints + hazards + routeMode
-        → generateDensePath()     A* per leg, then densify
+        → generateDensePath()
         → calculateRouteMetrics()
-        → calculatePlssConsumption(metrics, 1)   plan-end reserves
-        → assessRoute()           Go / No-Go for the stored plan
+        → calculatePlssConsumption(metrics, 1)
+        → assessRoute()
 ```
 
-Persisted in `localStorage` key `ares:v2` (mission, mode, waypoints, hazards).
+Persisted in `localStorage` key `ares:v2`.
 
-## 2. Live navigation (new)
+## 2. Live navigation (browser, 10 Hz)
 
-10 Hz tick in `NavigationProvider` (`document.hidden` pauses it):
-
-```
-if following:
-    speed = 0.9 m/s × terrainFactor × followSpeed
-    advance along active path
-    tickPlss(moving=true)
-else if walk + WASD/stick:
-    walkStep()
-    tickPlss(moving)
-else:
-    tickPlss(idle 0.42×)
-```
-
-After each pose update:
+Paused when `document.hidden`.
 
 ```
-sample elevation/slope
-project onto active path → progress, profile marker, instruction
-throttle return A* (~8 px)
-throttle reachable envelope (~16 px)
-postMessage ares:you to Cesium
+if following:   advanceAlongPath · tickPlss(moving)
+else if walk:   walkStep · tickPlss(moving)
+else:           tickPlss(idle 0.42×)
 ```
 
-## 3. Destination solve
+After each pose: sample elevation/slope, project onto the path, throttle return A* (~8 px) and envelope (~16 px), `postMessage ares:you`.
 
-`setDestination(poi | map pin | habitat)` snapshots `routeOrigin = astronaut` then:
+## 3. Destination solve (browser)
 
-```
-compareNavRoutes(origin, dest)
-  safe    → A*
-  direct  → straight
-  science → A* + POI vias
-UI picks routeMode
-activePath = comparisons[routeMode]
-charts / HUD / globe switch to that path
-```
+`setDestination` snapshots `routeOrigin = astronaut`, then `compareNavRoutes` (or `generatePlanetRoute` beyond the tactical box). The HUD binds `comparisons[routeMode]`.
 
-Clicks on the globe: iframe `ares:click` → `marsToCanvasCoords`. Outside 0..800, 0..600 is rejected.
+## 4. Decision engine (FastAPI)
 
-## 4. Cesium bridge
+`DecisionProvider` (`src/context/DecisionContext.jsx`) is the only caller of `src/services/aresApi.js`.
 
-Parent → globe
-
-| type | when | payload |
-| --- | --- | --- |
-| `ares:state` | dest / route / hazards / camera / envelope | overlays |
-| `ares:you` | 10 Hz pose | lat, lon, heading, elevation |
-| `ares:locate` | Locate astronaut button | fly / follow |
-
-Globe → parent
-
-| type | when |
+| Event | Call |
 | --- | --- |
-| `ares:ready` | bridge attached |
-| `ares:click` | left click on terrain |
+| Destination set | `POST /api/missions` then `POST /api/navigation/analyze` |
+| Mode / metrics / hazards change | debounced `analyze` + `compare` |
+| EVA follow | `POST /api/telemetry/update` every 2.5 s |
+| Validated hazard added | `POST /api/navigation/hazard` |
 
-All messages use `{ channel: 'ares', type, payload }`.
+Analyze payload includes frontend metrics (distance, slope, duration) and a subsample of waypoints. The engine does not re-run A*.
 
-## 5. Consumables
+On `REROUTE_REQUIRED` the UI toasts and, if the crew was in Direct mode, switches to Safe so the existing solver avoids the new radius.
 
-Tanks start full (`1200 L O₂`, `1800 Wh`, `4.8 L` feedwater).
+## 5. Cesium bridge
 
-`tickPlss` in `src/services/plssCalculator.js`:
+Parent → globe: `ares:state`, `ares:you`, `ares:locate`  
+Globe → parent: `ares:ready`, `ares:click`  
+All messages: `{ channel: 'ares', type, payload }`.
+
+## 6. Consumables
+
+Tanks start full (`1200 L O₂`, `1800 Wh`, `4.8 L` feedwater). `tickPlss`:
 
 - slope factor `1 + (max(slope,0)/10)^1.35 * 0.45`
 - mapped zone × 1.18
 - idle × 0.42
 - battery +60 W above 8° slope
 
-Point of no return is **routed**: remaining litres vs `(returnMinutes + 45) * burnRate`.
-
-## 6. What looks like a backend (and is not)
-
-The hazard log still shows report → validate → publish → replace. That is a client timeout sequence in `MissionContext.reportHazard`. The replacement path is a real A* re-solve on the same device.
+Point of no return is routed: remaining litres vs `(returnMinutes + 45) * burnRate`.
 
 ## 7. Offline
 
-Service worker (`public/sw.js`) caches the app shell in production. The globe needs the network. The tactical solver, HUD, charts, and EVA brief keep working offline.
+Service worker caches the app shell in production. The globe needs the network. Solver, HUD, charts, and EVA brief keep working if FastAPI or Trek is unreachable. The Go / No-Go card then shows “Decision engine offline”.
