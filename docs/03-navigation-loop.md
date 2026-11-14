@@ -75,6 +75,44 @@ Idle life support still drains slowly so a stopped crew is not frozen in time.
 
 `reachableEnvelope` is a Dijkstra on the same 16 px grid with remaining walk budget. It is a hull of reachable cells, not a circle. Recomputed about every 16 px of motion.
 
+## Core calculations (internally consistent)
+
+These are the numbers every panel must share. Do not invent disconnected percentages.
+
+### Route safety (engine)
+
+```
+terrain_risk   30%   max slope vs 15°, mean slope, relief
+hazard_risk    35%   count, proximity, LOW/MEDIUM/HIGH
+resource_risk  20%   O₂, battery, elapsed vs duration
+mission_risk   15%   EVA length vs 8 h, dust τ
+
+safety_score = 100 − total_risk
+```
+
+GO if total risk ≤ 40 and slope ≤ 15°. CAUTION above that. NO-GO if O₂ < 20%, battery < 15%, or total risk > 70.
+
+### Science score (frontend + compare)
+
+Driven by POIs on or near the path (`scienceCount`, site importance). Science mode inserts vias; adding a target increases distance, time, O₂, and science value.
+
+### Oxygen
+
+```
+O2 burn = nominalRate × (moving ? 1 : 0.42) × slopeFactor × terrainFactor × dtMin
+slopeFactor = 1 + (max(slope,0)/10)^1.35 × 0.45
+```
+
+Steeper → slower walk (`movementEngine`) → higher burn. Longer route → longer duration → more O₂.
+
+### Safe return
+
+```
+CanReturn = remaining O₂  >  (returnMinutes + 45 min reserve) × currentBurnRate
+```
+
+Envelope is Dijkstra on the tactical grid with remaining walk budget — not a circle. It shrinks as tanks fall.
+
 ## Performance rules
 
 - 10 Hz simulation tick, paused when the tab is hidden

@@ -10,6 +10,18 @@ export function headingBetween(ax, ay, bx, by) {
   return wrapDeg(deg);
 }
 
+/** True-north bearing from lat/lon when both points are geocoded; else canvas heading. */
+export function geoBearing(a, b) {
+  if (a?.lat == null || b?.lat == null || a?.lon == null || b?.lon == null) {
+    return headingBetween(a?.x || 0, a?.y || 0, b?.x || 0, b?.y || 0);
+  }
+  const φ1 = (a.lat * Math.PI) / 180, φ2 = (b.lat * Math.PI) / 180;
+  const λ = ((b.lon - a.lon) * Math.PI) / 180;
+  const y = Math.sin(λ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ);
+  return wrapDeg((Math.atan2(y, x) * 180) / Math.PI);
+}
+
 export function cardinal(deg) {
   const d = wrapDeg(deg);
   const names = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];

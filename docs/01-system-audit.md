@@ -2,6 +2,26 @@
 
 Inspected before the navigation work and again before the mission-backend work. Nothing below was discarded blindly.
 
+ARES is positioned as an **AI-powered decision and navigation system for human Mars EVAs**. The UI already had a globe, A*, PLSS, and Go/No-Go. The backend scores and persists those routes. This audit maps the product brief onto that stack so features are not rebuilt from scratch.
+
+## Product brief → existing modules
+
+| Brief capability | Where it lives | Demo beat |
+| --- | --- | --- |
+| Mission briefing | `src/components/Shell.jsx` `Briefing` | 0:15 |
+| Command map + NASA layers | Explorer + `MapCard` + `layersData.js` + Environment | 0:30 |
+| Terrain intelligence | `TerrainAhead`, HUD glance, slope on click/hover | 0:30 |
+| Three intelligent routes | `generateDensePath` modes `safe` / `direct` / `science` + `RouteComparison` | 0:50 |
+| Science opportunities | `sciencePoisData.js`, Target card, `addPoiToRoute` | 0:50 |
+| Explainable copilot | Engine `reasons[]` + `Verdict` + local `assess.js` (not a chatbot) | 2:00 |
+| Astronaut HUD | `NavigationHUD.jsx` | 1:20 |
+| GPS-style movement | `NavigationProvider` 10 Hz follow along the polyline | 1:20 |
+| Dynamic hazard | `reportHazard` → `POST /api/navigation/hazard` | 1:40 |
+| Automatic reroute | Frontend A* on validated hazard + re-analyze | 2:00 |
+| Safe return | `evaluateSafeReturn`, envelope, `SafeReturnPanel` | 2:30 |
+| Mission decision panel | Glance stats + `Verdict` + Tracker | throughout |
+| NASA data fusion | `docs/08-nasa-data.md`, Environment / Catalogue | 0:30 |
+
 ## What already worked (frontend)
 
 | Capability | Where | Real or modelled |

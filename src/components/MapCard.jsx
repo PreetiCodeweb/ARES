@@ -8,6 +8,7 @@ import { publishNav } from '../../mars-atlas-src/navSync.js';
 import { toast } from '../lib/toast.js';
 import { METERS_PER_PIXEL } from '../services/coordinates.js';
 import { hazardsAlong } from '../routing/planetRoute.js';
+import { GpsHud } from './GpsHud.jsx';
 
 /**
  * Hosts the original Mars Atlas globe and overlays ARES navigation state.
@@ -45,7 +46,12 @@ export const MapCard = memo(function MapCard() {
       hazards: planetary ? [] : M.hazards.map((h) => ({ ...canvasToLatLon(M.mission, h.x, h.y), rMeters: h.r * METERS_PER_PIXEL })),
       pois: planetary ? [] : M.pois.map((p) => ({ name: p.name, ...p.coordinates })),
       alerts: N.routeAlerts || [],
-      routeHazards: hazardsAlong(N.points)
+      routeHazards: hazardsAlong(N.points),
+      following: !!N.following,
+      progress: N.progress || 0,
+      remainingKm: N.remainingKm || 0,
+      instruction: N.instruction,
+      upcoming: N.upcoming
     };
   };
 
@@ -76,12 +82,33 @@ export const MapCard = memo(function MapCard() {
 
   useEffect(() => {
     pushState();
-  }, [n.cameraMode, n.destination, n.points, n.returnRoute, n.envelope, m.hazards, m.pois, m.missionId, n.home]);
+  }, [n.cameraMode, n.destination, n.points, m.hazards, m.pois, m.missionId, n.home, n.following]);
+
+  useEffect(() => {
+    if (n.following) return;
+    pushState();
+  }, [n.returnRoute, n.envelope]);
+
+  useEffect(() => {
+    if (!n.following) return;
+    const t = setTimeout(pushState, 900);
+    return () => clearTimeout(t);
+  }, [n.envelope, n.returnRoute, n.following]);
 
   useEffect(() => {
     if (!ready.current || !n.astronaut) return;
-    postToAtlas(iframe.current?.contentWindow, 'ares:you', n.astronaut.lat != null ? n.astronaut : { ...n.astronaut, ...canvasToLatLon(m.mission, n.astronaut.x, n.astronaut.y) });
-  }, [n.astronaut.x, n.astronaut.y, n.astronaut.heading, n.cameraMode, m.mission]);
+    const geo = n.astronaut.lat != null ? n.astronaut : { ...n.astronaut, ...canvasToLatLon(m.mission, n.astronaut.x, n.astronaut.y) };
+    postToAtlas(iframe.current?.contentWindow, 'ares:you', {
+      ...geo,
+      following: n.following,
+      progress: n.progress || 0,
+      remainingKm: n.remainingKm || 0,
+      planetary: !!n.planetary,
+      heading: n.astronaut.heading,
+      upcoming: n.upcoming,
+      cameraMode: n.cameraMode
+    });
+  }, [n.astronaut.x, n.astronaut.y, n.astronaut.lat, n.astronaut.lon, n.astronaut.heading, n.cameraMode, n.following, n.progress, n.upcoming?.meters, m.mission]);
 
   useEffect(() => {
     if (!ready.current) return;
@@ -151,6 +178,7 @@ export const MapCard = memo(function MapCard() {
             </div>
           )}
         </div>
+        <GpsHud />
         {!online && (
           <div className="absolute inset-x-3 bottom-3 well p-3 flex items-start gap-3 shadow-2xl" role="status">
             <Icon n="off" className="text-butter mt-0.5" />

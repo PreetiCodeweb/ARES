@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useMission } from './MissionContext.jsx';
 import { useNavigation } from './NavigationContext.jsx';
 import { toast } from '../lib/toast.js';
@@ -13,11 +13,21 @@ export function TelemetryProvider({ children }) {
 
   useEffect(() => { setAlerts((a) => a.slice(-1)); }, [missionId]);
 
+  const lastObs = useRef('');
   useEffect(() => {
     if (!n.following || !n.alongPoint) return;
     if (n.alongPoint.slope > 15) push('bad', `Slope ${n.alongPoint.slope.toFixed(1)}°. Keep three points of contact.`);
     else if (n.alongPoint.zone) push('warn', 'Inside a mapped hazard zone. Slow down and follow the marked line.');
   }, [n.alongPoint?.slope > 15, n.alongPoint?.zone, n.following]);
+
+  useEffect(() => {
+    if (!n.following || !n.upcoming) return;
+    const key = `${n.upcoming.name}:${n.alternate?.action || ''}`;
+    if (lastObs.current === key) return;
+    lastObs.current = key;
+    push(n.upcoming.band === 'hazard' ? 'warn' : 'info', `${n.upcoming.name} in ${n.upcoming.meters} m.`);
+    if (n.alternate) push('info', `${n.alternate.title}. ${n.alternate.label}.`);
+  }, [n.following, n.upcoming?.name, n.alternate?.action]);
 
   useEffect(() => {
     if (n.safeReturn.status === 'ponr') push('bad', 'Point of no return. Oxygen no longer covers a safe walk-back.');

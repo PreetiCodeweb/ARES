@@ -47,7 +47,7 @@ Planning data is modelled and simulated for design review. Not for flight.
                          SQLite
 ```
 
-Docs: [docs/README.md](docs/README.md)
+Docs: [docs/README.md](docs/README.md) · [3-minute demo](docs/07-demo.md) · [NASA data fusion](docs/08-nasa-data.md)
 
 ## Run locally
 

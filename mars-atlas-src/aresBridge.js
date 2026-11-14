@@ -151,6 +151,55 @@ export function attachAresBridge({ viewer }) {
   let lastRoute = [];
   let framed = false;
   let is2D = false;
+  let followOn = false;
+  let lastPaintKey = '';
+  const smooth = { lat: 18.44, lon: 77.45, heading: 0, range: 720 };
+
+  const traveled = ds.entities.add({
+    id: 'ares-traveled',
+    polyline: {
+      positions: [],
+      width: 3.5,
+      material: Cesium.Color.fromCssColorString('#8a7f90').withAlpha(0.85),
+      clampToGround: false,
+      arcType: Cesium.ArcType.GEODESIC
+    }
+  });
+  const remaining = ds.entities.add({
+    id: 'ares-remaining',
+    polyline: {
+      positions: [],
+      width: 7,
+      material: new Cesium.PolylineGlowMaterialProperty({
+        glowPower: 0.28,
+        taperPower: 0.85,
+        color: Cesium.Color.fromCssColorString('#7fc8cc')
+      }),
+      clampToGround: false,
+      arcType: Cesium.ArcType.GEODESIC
+    }
+  });
+  const nextHz = ds.entities.add({
+    id: 'ares-next-hazard',
+    show: false,
+    position: degrees({ lat: 18.44, lon: 77.45, height: H + 200 }),
+    point: {
+      pixelSize: 16,
+      color: Cesium.Color.fromCssColorString('#ff6b6b'),
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY
+    },
+    label: {
+      text: 'HAZARD',
+      font: '700 11px Inter, sans-serif',
+      fillColor: Cesium.Color.fromCssColorString('#ffd0d0'),
+      showBackground: true,
+      backgroundColor: Cesium.Color.fromCssColorString('#2a1010').withAlpha(0.9),
+      pixelOffset: new Cesium.Cartesian2(0, -22),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY
+    }
+  });
 
   const BAND_COLOR = {
     safe: '#6fd6a3',
@@ -160,7 +209,13 @@ export function attachAresBridge({ viewer }) {
 
   function linePositions(pts) {
     if (!pts?.length) return [];
-    return pts.map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, H));
+    const hOff = followOn ? 30 : H;
+    return pts.map((p) => {
+      const carto = Cesium.Cartographic.fromDegrees(p.lon, p.lat);
+      const sampled = viewer.scene.globe.getHeight(carto);
+      const z = (Number.isFinite(sampled) ? sampled : 0) + hOff;
+      return Cesium.Cartesian3.fromDegrees(p.lon, p.lat, followOn ? z : H);
+    });
   }
 
   function offset(lat, lon, heading, meters) {
@@ -170,31 +225,96 @@ export function attachAresBridge({ viewer }) {
     return { lat: lat + dLat, lon: lon + dLon };
   }
 
-  function followCamera(youState) {
-    if (cameraMode !== 'astronaut' || !youState) return;
-    viewer.scene.screenSpaceCameraController.minimumZoomDistance = 8;
-    const destC = Cesium.Cartesian3.fromDegrees(youState.lon, youState.lat, (youState.elevation || 0) + 18);
-    viewer.camera.setView({
-      destination: destC,
-      orientation: {
-        heading: Cesium.Math.toRadians(youState.heading || 0),
-        pitch: Cesium.Math.toRadians(-22),
-        roll: 0
-      }
-    });
+  function routeKey(pts) {
+    if (!pts?.length) return '';
+    const a = pts[0], b = pts[pts.length - 1];
+    return `${pts.length}:${a?.lat}:${a?.lon}:${b?.lat}:${b?.lon}`;
   }
+
+  function splitProgress(progress) {
+    if (!lastRoute.length) {
+      traveled.polyline.positions = [];
+      remaining.polyline.positions = [];
+      return;
+    }
+    const cut = Math.max(1, Math.min(lastRoute.length - 1, Math.round((progress || 0) * (lastRoute.length - 1))));
+    traveled.polyline.positions = linePositions(lastRoute.slice(0, cut + 1));
+    remaining.polyline.positions = linePositions(lastRoute.slice(Math.max(0, cut - 1)));
+  }
+
+  function setFollow(on) {
+    if (followOn === on) return;
+    followOn = on;
+    if (on) {
+      try { viewer.camera.cancelFlight(); } catch { /* empty */ }
+      viewer.scene.screenSpaceCameraController.enableRotate = false;
+      viewer.scene.screenSpaceCameraController.enableTranslate = false;
+      viewer.scene.screenSpaceCameraController.enableZoom = false;
+      if (lastYou) {
+        smooth.lat = lastYou.lat;
+        smooth.lon = lastYou.lon;
+        smooth.heading = lastYou.heading || 0;
+      }
+    } else {
+      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      viewer.scene.screenSpaceCameraController.enableRotate = true;
+      viewer.scene.screenSpaceCameraController.enableTranslate = true;
+      viewer.scene.screenSpaceCameraController.enableZoom = true;
+    }
+  }
+
+  function followCamera() {
+    if (!followOn || !lastYou) return;
+    const a = 0.16;
+    smooth.lat += (lastYou.lat - smooth.lat) * a;
+    smooth.lon += (lastYou.lon - smooth.lon) * a;
+    let dh = (lastYou.heading || 0) - smooth.heading;
+    while (dh > 180) dh -= 360;
+    while (dh < -180) dh += 360;
+    smooth.heading += dh * a;
+    const wantRange = Math.min(2400, Math.max(520, (lastYou.remainingKm || 0.5) * 850));
+    smooth.range += (wantRange - smooth.range) * 0.08;
+    const carto = Cesium.Cartographic.fromDegrees(smooth.lon, smooth.lat);
+    const sampled = viewer.scene.globe.getHeight(carto);
+    const alt = (Number.isFinite(sampled) ? sampled : 0) + 24;
+    const target = Cesium.Cartesian3.fromDegrees(smooth.lon, smooth.lat, alt);
+    viewer.camera.lookAt(
+      target,
+      new Cesium.HeadingPitchRange(
+        Cesium.Math.toRadians(smooth.heading),
+        Cesium.Math.toRadians(-50),
+        smooth.range
+      )
+    );
+  }
+
+  viewer.scene.preRender.addEventListener(followCamera);
 
   function applyYou(youState) {
     if (!youState) return;
     lastYou = youState;
-    const pos = Cesium.Cartesian3.fromDegrees(youState.lon, youState.lat, 14);
+    if (youState.cameraMode) cameraMode = youState.cameraMode;
+    const longHaul = !!(youState.planetary && (youState.remainingKm || 0) > 12);
+    setFollow(!!youState.following && cameraMode === 'astronaut' && !longHaul);
+    if (followOn) {
+      try { viewer.camera.cancelFlight(); } catch { /* empty */ }
+    }
+    const carto = Cesium.Cartographic.fromDegrees(youState.lon, youState.lat);
+    const sampled = viewer.scene.globe.getHeight(carto);
+    const alt = (Number.isFinite(sampled) ? sampled : 0) + 16;
+    const pos = Cesium.Cartesian3.fromDegrees(youState.lon, youState.lat, alt);
     you.position = pos;
-    const tip = offset(youState.lat, youState.lon, youState.heading || 0, 90);
+    const tip = offset(youState.lat, youState.lon, youState.heading || 0, 140);
     headingLine.polyline.positions = [
-      Cesium.Cartesian3.fromDegrees(youState.lon, youState.lat),
-      Cesium.Cartesian3.fromDegrees(tip.lon, tip.lat)
+      Cesium.Cartesian3.fromDegrees(youState.lon, youState.lat, alt),
+      Cesium.Cartesian3.fromDegrees(tip.lon, tip.lat, alt)
     ];
-    followCamera(youState);
+    if (youState.progress != null) splitProgress(youState.progress);
+    if (youState.upcoming?.lat != null && youState.upcoming?.lon != null) {
+      nextHz.show = true;
+      nextHz.position = Cesium.Cartesian3.fromDegrees(youState.upcoming.lon, youState.upcoming.lat, H + 240);
+      nextHz.label.text = `${youState.upcoming.name || 'Hazard'} · ${youState.upcoming.meters} m`;
+    } else nextHz.show = false;
   }
 
   function addLine(pts, color, width, glow, meta) {
@@ -258,7 +378,7 @@ export function attachAresBridge({ viewer }) {
   }
 
   function flyRoute(pts) {
-    if (!pts?.length) return;
+    if (!pts?.length || followOn) return;
     if (embedded) closeDock();
     const a = pts[0], b = pts[pts.length - 1];
     let lon1 = a.lon, lon2 = b.lon;
@@ -277,7 +397,7 @@ export function attachAresBridge({ viewer }) {
     if (!s) return;
     cameraMode = s.cameraMode || 'orbit';
     viewer.scene.screenSpaceCameraController.minimumZoomDistance = cameraMode === 'astronaut' ? 8 : 1200;
-    applyYou(s.astronaut);
+    applyYou({ ...(s.astronaut || {}), following: s.following, progress: s.progress, remainingKm: s.remainingKm, planetary: s.planetary, upcoming: s.upcoming, cameraMode });
     if (s.home) {
       home.position = Cesium.Cartesian3.fromDegrees(s.home.lon, s.home.lat, 12);
       home.show = true;
@@ -288,85 +408,91 @@ export function attachAresBridge({ viewer }) {
       dest.show = true;
     } else dest.show = false;
 
-    const prevKey = lastRoute.length ? `${lastRoute[0]?.lat},${lastRoute.at(-1)?.lat},${lastRoute.length}` : '';
     lastRoute = s.route || [];
+    const nextKey = routeKey(lastRoute);
     const retPts = linePositions(s.returnRoute || []);
     returnPath.polyline.positions = retPts;
     returnPath.polyline.clampToGround = false;
-    returnPath.show = retPts.length > 1;
+    returnPath.show = retPts.length > 1 && !s.following;
     const env = s.envelope || [];
-    if (env.length > 3) {
+    if (env.length > 3 && !s.following) {
       envelope.polygon.hierarchy = new Cesium.PolygonHierarchy(linePositions(env));
       envelope.show = true;
     } else envelope.show = false;
 
-    extras.forEach((e) => ds.entities.remove(e));
-    extras.length = 0;
-    paintRoute(lastRoute);
-    const labeled = new Set();
-    lastRoute.forEach((p) => {
-      if (!p.hazardName || labeled.has(p.hazardName)) return;
-      if (!p.hazard && p.band === 'safe') return;
-      labeled.add(p.hazardName);
-      const hot = p.hazard || p.band === 'hazard';
-      const meta = hazardMeta(p);
-      const mark = routeDs.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, H + 400),
-        ellipse: {
-          semiMajorAxis: hot ? 160000 : 90000,
-          semiMinorAxis: hot ? 160000 : 90000,
-          material: Cesium.Color.fromCssColorString(hot ? '#ff6b6b' : '#e8a53d').withAlpha(0.22),
-          outline: true,
-          outlineColor: Cesium.Color.fromCssColorString(hot ? '#ff6b6b' : '#e8a53d').withAlpha(0.85),
-          height: H
-        },
-        point: {
-          pixelSize: hot ? 18 : 14,
-          color: Cesium.Color.fromCssColorString(hot ? '#ff6b6b' : '#e8a53d'),
-          outlineColor: Cesium.Color.WHITE,
-          outlineWidth: 2,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY
-        },
-        label: {
-          text: `${hot ? '⚠ ' : ''}${p.hazardName}`,
-          font: '700 12px Inter, sans-serif',
-          fillColor: Cesium.Color.fromCssColorString(hot ? '#ffd0d0' : '#ffe3b0'),
-          showBackground: true,
-          backgroundColor: Cesium.Color.fromCssColorString(hot ? '#2a1010' : '#24180a').withAlpha(0.88),
-          pixelOffset: new Cesium.Cartesian2(0, -22),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY
-        }
-      });
-      mark.aresHazard = meta;
-    });
-    if (!s.planetary) {
-      (s.hazards || []).forEach((h) => {
-        extras.push(ds.entities.add({
-          position: Cesium.Cartesian3.fromDegrees(h.lon, h.lat, H),
+    const shouldPaint = nextKey !== lastPaintKey;
+    if (shouldPaint) {
+      extras.forEach((e) => ds.entities.remove(e));
+      extras.length = 0;
+      paintRoute(lastRoute);
+      lastPaintKey = nextKey;
+    }
+    splitProgress(s.progress || 0);
+    if (shouldPaint) {
+      const labeled = new Set();
+      lastRoute.forEach((p) => {
+        if (!p.hazardName || labeled.has(p.hazardName)) return;
+        if (!p.hazard && p.band === 'safe') return;
+        labeled.add(p.hazardName);
+        const hot = p.hazard || p.band === 'hazard';
+        const meta = hazardMeta(p);
+        const mark = routeDs.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, H + 400),
           ellipse: {
-            semiMajorAxis: h.rMeters || 80,
-            semiMinorAxis: h.rMeters || 80,
-            material: Cesium.Color.fromCssColorString('#ff6b6b').withAlpha(0.28),
+            semiMajorAxis: hot ? 160000 : 90000,
+            semiMinorAxis: hot ? 160000 : 90000,
+            material: Cesium.Color.fromCssColorString(hot ? '#ff6b6b' : '#e8a53d').withAlpha(0.22),
             outline: true,
-            outlineColor: Cesium.Color.fromCssColorString('#ff6b6b')
+            outlineColor: Cesium.Color.fromCssColorString(hot ? '#ff6b6b' : '#e8a53d').withAlpha(0.85),
+            height: H
+          },
+          point: {
+            pixelSize: hot ? 18 : 14,
+            color: Cesium.Color.fromCssColorString(hot ? '#ff6b6b' : '#e8a53d'),
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 2,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
+          },
+          label: {
+            text: `${hot ? '⚠ ' : ''}${p.hazardName}`,
+            font: '700 12px Inter, sans-serif',
+            fillColor: Cesium.Color.fromCssColorString(hot ? '#ffd0d0' : '#ffe3b0'),
+            showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString(hot ? '#2a1010' : '#24180a').withAlpha(0.88),
+            pixelOffset: new Cesium.Cartesian2(0, -22),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY
           }
-        }));
+        });
+        mark.aresHazard = meta;
       });
-      (s.pois || []).forEach((p) => {
-        extras.push(ds.entities.add({
-          position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, H),
-          point: { pixelSize: 8, color: Cesium.Color.fromCssColorString('#7fc8cc'), outlineColor: Cesium.Color.WHITE, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
-          label: { text: p.name, font: '600 10px Inter, sans-serif', fillColor: Cesium.Color.fromCssColorString('#cfe9ea'), pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: Number.POSITIVE_INFINITY, show: cameraMode === 'orbit' }
-        }));
-      });
+      if (!s.planetary) {
+        (s.hazards || []).forEach((h) => {
+          extras.push(ds.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(h.lon, h.lat, H),
+            ellipse: {
+              semiMajorAxis: h.rMeters || 80,
+              semiMinorAxis: h.rMeters || 80,
+              material: Cesium.Color.fromCssColorString('#ff6b6b').withAlpha(0.28),
+              outline: true,
+              outlineColor: Cesium.Color.fromCssColorString('#ff6b6b')
+            }
+          }));
+        });
+        (s.pois || []).forEach((p) => {
+          extras.push(ds.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, H),
+            point: { pixelSize: 8, color: Cesium.Color.fromCssColorString('#7fc8cc'), outlineColor: Cesium.Color.WHITE, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+            label: { text: p.name, font: '600 10px Inter, sans-serif', fillColor: Cesium.Color.fromCssColorString('#cfe9ea'), pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: Number.POSITIVE_INFINITY, show: cameraMode === 'orbit' }
+          }));
+        });
+      }
     }
 
-    const nextKey = lastRoute.length ? `${lastRoute[0]?.lat},${lastRoute.at(-1)?.lat},${lastRoute.length}` : '';
-    if (lastRoute.length > 1 && nextKey !== prevKey) {
+    if (lastRoute.length > 1 && shouldPaint && !followOn && !s.following) {
       framed = true;
       closeDock();
       flyRoute(lastRoute);
-    } else if (!framed && s.astronaut) {
+    } else if (!framed && s.astronaut && !followOn) {
       framed = true;
       flyTo(viewer, s.astronaut.lat, s.astronaut.lon, 6, 2.4);
     }
@@ -384,11 +510,11 @@ export function attachAresBridge({ viewer }) {
     }
     if (data.type === 'ares:you') applyYou(data.payload);
     if (data.type === 'ares:locate' && lastYou) {
-      if (cameraMode === 'astronaut') followCamera(lastYou);
-      else flyTo(viewer, lastYou.lat, lastYou.lon, 4, 1.4);
+      if (followOn) return;
+      flyTo(viewer, lastYou.lat, lastYou.lon, 4, 1.4);
     }
-    if (data.type === 'ares:home' && lastYou) flyTo(viewer, lastYou.lat, lastYou.lon, 8, 1.6);
-    if (data.type === 'ares:fit') flyRoute(lastRoute);
+    if (data.type === 'ares:home' && lastYou && !followOn) flyTo(viewer, lastYou.lat, lastYou.lon, 8, 1.6);
+    if (data.type === 'ares:fit' && !followOn) flyRoute(lastRoute);
     if (data.type === 'ares:morph') {
       const want2D = !!data.payload?.flat;
       if (want2D !== is2D) {

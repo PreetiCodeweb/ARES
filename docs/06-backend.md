@@ -2,6 +2,8 @@
 
 FastAPI service in `backend/`. Swagger: http://127.0.0.1:8000/docs
 
+This is the explainable copilot, not a chatbot. Every GO / CAUTION / NO-GO includes `reasons[]` and a `recommended_action` derived from the live A* metrics, tanks, and hazards.
+
 ## Health
 
 ```

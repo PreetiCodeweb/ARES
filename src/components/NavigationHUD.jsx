@@ -157,15 +157,34 @@ const Mini = ({ k, v }) => <div className="well p-2"><div className="label">{k}<
 const LV = { pass: 'tag-go', warn: 'tag-caution', fail: 'tag-hold' };
 
 export function RouteAlerts() {
+  const m = useMission();
   const n = useNavigation();
   const alerts = n.routeAlerts || [];
-  if (!alerts.length) return null;
+  const live = n.upcoming;
+  const alt = n.alternate;
+  if (!alerts.length && !live) return null;
   return (
     <section className="card p-4 flex flex-col gap-2" aria-live="polite">
       <div className="flex items-center justify-between">
         <h2 className="font-semibold text-[15px]">Route warnings</h2>
         <span className="text-xs text-dust">{n.destination?.name}</span>
       </div>
+      {live && (
+        <div className="well p-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold text-[13px]">{live.name} in {live.meters} m</span>
+            <span className={`tag ${live.band === 'hazard' ? 'tag-hold' : 'tag-caution'}`}>Ahead</span>
+          </div>
+          <p className="text-xs text-dust mt-1">
+            {alt ? alt.text : 'Stay on the marked GPS line. Slow on slope and keep the 45 min return reserve.'}
+          </p>
+          {alt && (
+            <button type="button" className="btn btn-pri mt-2 !min-h-9" onClick={() => alt.action === 'safe' ? m.setRouteMode('safe') : n.returnToBase()}>
+              <Icon n={alt.action === 'safe' ? 'shield' : 'home'} s={14} />{alt.label}
+            </button>
+          )}
+        </div>
+      )}
       {alerts.map((a) => (
         <button key={a.id} type="button" className="well p-3 text-left" onClick={() => toast(a.label, a.level === 'fail' ? 'bad' : a.level === 'warn' ? 'warn' : 'ok', a.detail)}>
           <div className="flex items-center justify-between gap-2">

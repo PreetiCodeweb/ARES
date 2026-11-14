@@ -2,6 +2,22 @@
 
 ARES is a two-process prototype: a static Vite shell and a FastAPI decision engine.
 
+Product flow (what the judge should see):
+
+```
+Mission briefing
+    → NASA data fusion (Trek + catalogued science)
+    → Terrain & hazard analysis
+    → Multi-objective A* (Safest / Fastest / Science)
+    → Route comparison + GO / CAUTION / NO-GO
+    → EVA start (GPS HUD)
+    → Dynamic hazard
+    → Automatic reroute
+    → Safe return analysis
+```
+
+Engineering flow (what actually runs):
+
 ```
 MissionProvider          waypoints, hazards, routeMode, planned A* path
   NavigationProvider     astronaut, destination, live route, PLSS tanks, return

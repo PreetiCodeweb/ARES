@@ -4,9 +4,9 @@ import { canvasToMarsCoords, marsToCanvasCoords } from '../services/coordinates.
 import { assessRoute } from '../services/assess.js';
 import { fullTanks, tickPlss } from '../services/plssCalculator.js';
 import { toast } from '../lib/toast.js';
-import { headingBetween, headingLabel } from '../navigation/heading.js';
+import { geoBearing, headingLabel } from '../navigation/heading.js';
 import { advanceAlongPath, BASE_WALK_MPS, nearestIndex, pointAtDistance, sampleTerrain, snapToPath, speedFactor, walkStep } from '../navigation/movementEngine.js';
-import { nextInstruction, terrainAhead } from '../analysis/routeAnalysis.js';
+import { alternateAdvice, nextInstruction, terrainAhead, upcomingHazard } from '../analysis/routeAnalysis.js';
 import { compareNavRoutes, evaluateSafeReturn, generateReturnRoute, reachableEnvelope } from '../routing/returnRoute.js';
 import { generatePlanetRoute, isPlanetaryDest } from '../routing/planetRoute.js';
 function fmtGeo(lat, lon) {
@@ -114,7 +114,13 @@ export function NavigationProvider({ children }) {
     };
   }), [rawStations, activePoints, activeMetrics]);
 
-  const idx = useMemo(() => nearestIndex(activePoints, astronaut.x, astronaut.y), [activePoints, astronaut.x, astronaut.y]);
+  const idx = useMemo(() => {
+    if (following && activePoints.length > 1) {
+      const p = pointAtDistance(activePoints, alongPx);
+      return p?.idx ?? nearestIndex(activePoints, astronaut.x, astronaut.y);
+    }
+    return nearestIndex(activePoints, astronaut.x, astronaut.y);
+  }, [following, alongPx, activePoints, astronaut.x, astronaut.y]);
   const progress = activePoints.length ? Math.min(1, (alongPx / (activePoints[activePoints.length - 1].d || 1))) : 0;
   const alongPoint = activePoints[idx] || null;
 
@@ -130,6 +136,11 @@ export function NavigationProvider({ children }) {
     [activePoints, idx, geoAstro.heading]
   );
   const ahead = useMemo(() => terrainAhead(activePoints, idx), [activePoints, idx]);
+  const upcoming = useMemo(() => upcomingHazard(activePoints, idx), [activePoints, idx]);
+  const alternate = useMemo(
+    () => alternateAdvice({ comparisons, routeMode, obstacle: upcoming, planetary: !!routed?.planetary }),
+    [comparisons, routeMode, upcoming, routed?.planetary]
+  );
 
   const tanksSnap = useMemo(() => {
     const slope = geoAstro.slope || 0;
@@ -138,12 +149,14 @@ export function NavigationProvider({ children }) {
 
   const returnSnap = useRef({ from: null, path: { points: [], metrics: activeMetrics } });
   const returnRoute = useMemo(() => {
-    const key = `${missionId}:${Math.round(geoAstro.x / 8)}:${Math.round(geoAstro.y / 8)}:${routing?.length || 0}`;
+    if (routed?.planetary) return returnSnap.current.path || { points: [], metrics: activeMetrics };
+    const bin = following ? 40 : 8;
+    const key = `${missionId}:${Math.round(geoAstro.x / bin)}:${Math.round(geoAstro.y / bin)}:${routing?.length || 0}`;
     if (returnSnap.current.from === key) return returnSnap.current.path;
     const pathR = generateReturnRoute(geoAstro, home, missionId, routing);
     returnSnap.current = { from: key, path: pathR };
     return pathR;
-  }, [geoAstro.x, geoAstro.y, home, missionId, routing]);
+  }, [geoAstro.x, geoAstro.y, home, missionId, routing, following, routed?.planetary, activeMetrics]);
 
   const safeReturn = useMemo(() => evaluateSafeReturn(tanksSnap, returnRoute.metrics), [tanksSnap, returnRoute]);
   const plss = useMemo(() => ({
@@ -160,11 +173,12 @@ export function NavigationProvider({ children }) {
   useEffect(() => {
     if (routed?.planetary) { setEnvelope([]); return; }
     const budget = safeReturn.budgetMeters;
-    const key = `${Math.round(geoAstro.x / 16)}:${Math.round(geoAstro.y / 16)}:${Math.round(budget / 80)}:${routing?.length || 0}`;
+    const bin = following ? 48 : 16;
+    const key = `${Math.round(geoAstro.x / bin)}:${Math.round(geoAstro.y / bin)}:${Math.round(budget / 80)}:${routing?.length || 0}`;
     if (lastReturnAt.current === key) return;
     lastReturnAt.current = key;
     setEnvelope(reachableEnvelope(missionId, geoAstro, budget, routing));
-  }, [geoAstro.x, geoAstro.y, safeReturn.budgetMeters, missionId, routing, routed?.planetary]);
+  }, [geoAstro.x, geoAstro.y, safeReturn.budgetMeters, missionId, routing, routed?.planetary, following]);
 
   live.current = {
     mission, missionId, routing, astronaut, following, followSpeed, controlMode, stick,
@@ -244,6 +258,15 @@ export function NavigationProvider({ children }) {
     }, 100);
     return () => clearInterval(id);
   }, [applyPose, burn]);
+
+  useEffect(() => {
+    if (!activePoints.length || routed?.planetary) return;
+    const snap = snapToPath(activePoints, astronaut.x, astronaut.y);
+    setAlongPx(snap.alongPx);
+    if (!following) return;
+    const pt = pointAtDistance(activePoints, snap.alongPx);
+    if (pt) applyPose({ ...pt, heading: pt.heading }, 0);
+  }, [routeMode]);
 
   const locateAstronaut = () => setLocatePulse((n) => n + 1);
 
@@ -340,16 +363,18 @@ export function NavigationProvider({ children }) {
         y: start.y,
         lat: start.lat,
         lon: start.lon,
-        heading: next ? headingBetween(start.x, start.y, next.x, next.y) : astronaut.heading,
+        heading: next ? geoBearing(start, next) : astronaut.heading,
         elevation: start.elevation,
         slope: start.slope || 0
       }, 0);
       if (activeMetrics.distanceKm > 12) toast('Preview only: this destination is beyond suited EVA range.', 'warn');
     } else {
-      relocateTo(start.x, start.y, headingBetween(start.x, start.y, next.x, next.y));
+      relocateTo(start.x, start.y, geoBearing(start, next));
     }
     setAlongPx(0);
     setControlMode('navigate');
+    const longHaul = !!routed?.planetary && (activeMetrics.distanceKm || 0) > 12;
+    if (!longHaul) setCameraMode('astronaut');
     setFollowing(true);
   };
 
@@ -377,12 +402,37 @@ export function NavigationProvider({ children }) {
 
   const toggleFollow = () => {
     if (!activePoints.length) return;
-    if (progress >= 1) {
-      relocateTo(activePoints[0].x, activePoints[0].y);
-      setAlongPx(0);
+    if (following) {
+      setFollowing(false);
+      return;
     }
-    if (!following) toast('EVA under way. Consumables now track terrain effort.', 'info');
-    setFollowing((p) => !p);
+    if (progress >= 0.999) {
+      const start = activePoints[0];
+      const next = activePoints[1] || start;
+      if (routed?.planetary) {
+        applyPose({
+          ...astronaut,
+          x: start.x, y: start.y, lat: start.lat, lon: start.lon,
+          heading: geoBearing(start, next),
+          elevation: start.elevation, slope: start.slope || 0
+        }, 0);
+      } else {
+        relocateTo(start.x, start.y, geoBearing(start, next));
+      }
+      setAlongPx(0);
+    } else if (!routed?.planetary) {
+      const snap = snapToPath(activePoints, astronaut.x, astronaut.y);
+      const target = activePoints[snap.idx];
+      if (target && Math.hypot(astronaut.x - target.x, astronaut.y - target.y) > 24) {
+        relocateTo(target.x, target.y, target.heading || astronaut.heading);
+        setAlongPx(snap.alongPx);
+      }
+    }
+    setControlMode('navigate');
+    const longHaul = !!routed?.planetary && (activeMetrics.distanceKm || 0) > 12;
+    if (!longHaul) setCameraMode('astronaut');
+    setFollowing(true);
+    toast('GPS follow on. Heading-up view along the solved path.', 'info');
   };
 
   const value = {
@@ -399,7 +449,7 @@ export function NavigationProvider({ children }) {
     traveledM, traveledKm: traveledM / 1000, elapsedMin,
     locatePulse, locateAstronaut, routeFitPulse,
     points: activePoints, stations: activeStations, metrics: activeMetrics,
-    comparisons, instruction, ahead, plss, assessment,
+    comparisons, instruction, ahead, upcoming, alternate, plss, assessment,
     returnRoute, safeReturn, envelope,
     headingText: headingLabel(geoAstro.heading),
     stick, setStick,

@@ -1,6 +1,6 @@
 import { SLOPE_LIMIT } from '../services/pathSolver.js';
 import { pixelsToKm, pixelsToMeters } from '../services/coordinates.js';
-import { cardinal, headingBetween } from '../navigation/heading.js';
+import { cardinal, geoBearing, headingBetween } from '../navigation/heading.js';
 
 const band = (slope, zone, reported) => {
   if (reported || slope > SLOPE_LIMIT) return 'hazard';
@@ -40,10 +40,10 @@ export function nextInstruction(points, idx, heading) {
   const end = points[points.length - 1];
   const remainingPx = Math.max(0, (end.d || 0) - (here.d || 0));
   const remainingKm = pixelsToKm(remainingPx);
-  const bearing = look ? headingBetween(here.x, here.y, look.x, look.y) : heading || 0;
+  const bearing = look ? geoBearing(here, look) : heading || 0;
   let nextTurn = 0;
   for (let k = i + 4; k < Math.min(points.length, i + 40); k++) {
-    const h = headingBetween(points[k - 1].x, points[k - 1].y, points[k].x, points[k].y);
+    const h = geoBearing(points[k - 1], points[k]);
     let delta = ((h - bearing + 540) % 360) - 180;
     if (Math.abs(delta) > 28) { nextTurn = pixelsToMeters((points[k].d || 0) - (here.d || 0)); break; }
   }
@@ -51,10 +51,77 @@ export function nextInstruction(points, idx, heading) {
   const caution = here.isHazard ? 'Hazard underfoot' : here.zone ? 'Mapped hazard zone' : here.slope > 12 ? 'Steep slope ahead' : look?.slope > SLOPE_LIMIT ? 'Terrain caution ahead' : null;
   const text = remainingPx < 12
     ? 'Arriving at destination'
-    : `Continue ${Math.round(distM)} m ${cardinal(bearing).toLowerCase()}`;
+    : `Continue ${Math.round(distM)} m ${cardinal(bearing)}`;
   return { text, remainingKm, remainingM: pixelsToMeters(remainingPx), bearing, caution };
 }
 
 export function classifyPoint(p) {
   return band(p?.slope || 0, p?.zone, p?.reported);
+}
+
+/** First hazard or steep section still ahead of the crew. */
+export function upcomingHazard(points, idx, lookM = 480) {
+  if (!points.length) return null;
+  const i0 = Math.max(0, Math.min(idx, points.length - 1));
+  const origin = points[i0].d || 0;
+  let caution = null;
+  for (let i = i0; i < points.length; i++) {
+    const meters = pixelsToMeters((points[i].d || 0) - origin);
+    if (meters > lookM) break;
+    const p = points[i];
+    const kind = p.hazardName
+      || (p.reported ? 'Reported hazard' : p.slope > SLOPE_LIMIT ? `Slope ${p.slope.toFixed(0)}°` : p.zone ? 'Mapped hazard zone' : null);
+    if (!kind) continue;
+    const hot = !!(p.isHazard || p.reported || p.slope > SLOPE_LIMIT || p.band === 'hazard');
+    const hit = {
+      kind,
+      meters: Math.max(20, Math.round(meters)),
+      slope: p.slope || 0,
+      band: hot ? 'hazard' : 'caution',
+      name: p.hazardName || kind,
+      lat: p.lat,
+      lon: p.lon
+    };
+    if (hot) return hit;
+    if (!caution) caution = hit;
+  }
+  return caution;
+}
+
+/** Suggest Safest (or abort) when the active route still hits ground that another mode avoids. */
+export function alternateAdvice({ comparisons, routeMode, obstacle, planetary }) {
+  if (!obstacle) return null;
+  if (planetary && routeMode !== 'safe' && comparisons?.safe) {
+    const cur = comparisons[routeMode]?.metrics;
+    const safe = comparisons.safe.metrics;
+    const extraKm = Math.max(0, (safe?.distanceKm || 0) - (cur?.distanceKm || 0));
+    const extraMin = Math.round(Math.max(0, (safe?.estimatedTimeMin || 0) - (cur?.estimatedTimeMin || 0)));
+    return {
+      action: 'safe',
+      label: 'Switch to Safest route',
+      title: `${obstacle.name} in ${obstacle.meters} m`,
+      text: extraKm > 0.05
+        ? `Safest skirts this obstacle. Extra ${extraKm.toFixed(1)} km · +${extraMin} min.`
+        : 'Safest skirts the mapped hazard with little extra distance.'
+    };
+  }
+  if (routeMode !== 'safe' && comparisons?.safe) {
+    const cur = comparisons[routeMode]?.metrics;
+    const safe = comparisons.safe.metrics;
+    const extraMin = Math.round(Math.max(0, (safe?.estimatedTimeMin || 0) - (cur?.estimatedTimeMin || 0)));
+    return {
+      action: 'safe',
+      label: 'Take alternate (Safest)',
+      title: `${obstacle.name} ahead · ${obstacle.meters} m`,
+      text: extraMin
+        ? `Safest avoids the worst slope and hazard cells. +${extraMin} min vs this path.`
+        : 'Safest avoids the upcoming obstacle with a similar duration.'
+    };
+  }
+  return {
+    action: 'return',
+    label: 'Return to base',
+    title: `${obstacle.name} in ${obstacle.meters} m`,
+    text: 'You are already on the safest solved path. Slow down, or abort to habitat if the slope keeps climbing.'
+  };
 }

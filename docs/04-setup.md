@@ -1,5 +1,9 @@
 # Project setup
 
+Two processes. Vite proxies `/api` and `/health` to FastAPI (`vite.config.js`).
+
+Timed judging script: [07-demo.md](./07-demo.md). NASA sources: [08-nasa-data.md](./08-nasa-data.md).
+
 ## Requirements
 
 - Node.js 18+
@@ -76,6 +80,24 @@ Default site: Jezero Crater, habitat **Ares Base Alpha**.
 8. **Report hazard** mid-walk. After validation the route re-solves. If the engine returns `REROUTE REQUIRED`, Direct mode switches to Safe.
 9. Watch **Safe return**. If margin drops, **Return to base**.
 10. Camera **Astronaut** for a heading-up follow view. **Walk** + WASD for manual motion.
+
+## 3-minute judging table
+
+| Time | Beat | Click |
+| --- | --- | --- |
+| 0:00 | Problem: no Google Maps on Mars | Globe, don't click yet |
+| 0:15 | Mission briefing | **Start planning** |
+| 0:30 | NASA layers + terrain intelligence | Explorer, terrain-ahead |
+| 0:50 | Safest / Fastest / Science | Destination + mode toggle |
+| 1:20 | EVA starts | **Begin EVA** — marker must move |
+| 1:40 | Hazard | **Report hazard** on the path |
+| 2:00 | Reroute + reasons | New polyline + Verdict |
+| 2:30 | Safe return | Envelope + O₂ vs walk-back |
+| 2:50 | Close | Decision chain, not the map |
+
+Close:
+
+> ARES transforms NASA Mars data into real-time mission decisions for the first humans who will walk on Mars.
 
 ## Keyboard
 

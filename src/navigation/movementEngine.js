@@ -1,7 +1,7 @@
 import { getElevationAtPoint, getSlopeAtPoint } from '../data/terrainElevationData.js';
 import { METERS_PER_PIXEL } from '../services/coordinates.js';
 import { inMappedZone, inReported, SLOPE_LIMIT } from '../services/pathSolver.js';
-import { headingBetween, offsetByHeading, turnToward, wrapDeg } from './heading.js';
+import { geoBearing, headingBetween, offsetByHeading, turnToward, wrapDeg } from './heading.js';
 
 export const BASE_WALK_MPS = 0.9; // ~3.2 km/h suited EVA walk on flat ground
 export const TURN_RATE_DPS = 70;
@@ -74,9 +74,7 @@ export function pointAtDistance(points, distPx) {
   const t = (d - a.d) / span;
   const x = a.x + (b.x - a.x) * t;
   const y = a.y + (b.y - a.y) * t;
-  const heading = (a.lat != null && b.lat != null)
-    ? (Math.atan2(b.lon - a.lon, b.lat - a.lat) * 180) / Math.PI
-    : headingBetween(a.x, a.y, b.x, b.y);
+  const heading = geoBearing(a, b);
   const lat = a.lat != null && b.lat != null ? a.lat + (b.lat - a.lat) * t : b.lat;
   const lon = a.lon != null && b.lon != null ? a.lon + (b.lon - a.lon) * t : b.lon;
   return { ...b, x, y, lat, lon, heading, d, idx: lo, t: max ? d / max : 0 };
@@ -97,7 +95,7 @@ export function advanceAlongPath(points, alongPx, meters, missionId, hazards) {
       y: next.y,
       lat: next.lat,
       lon: next.lon,
-      heading: look ? headingBetween(next.x, next.y, look.x, look.y) : next.heading,
+      heading: look ? geoBearing(next, look) : next.heading,
       ...sampled,
       elevation: next.elevation ?? sampled.elevation,
       slope: next.slope ?? sampled.slope,

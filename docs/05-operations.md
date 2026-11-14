@@ -2,6 +2,8 @@
 
 Two processes: Vite (UI + solvers) and FastAPI (decision engine). If the engine is down, the UI still plans, walks, and scores locally.
 
+Demo click path: [07-demo.md](./07-demo.md). Data provenance: [08-nasa-data.md](./08-nasa-data.md).
+
 ## 1. Mission plan (browser)
 
 On waypoint, mode, or validated-hazard change:
