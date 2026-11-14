@@ -61,40 +61,87 @@ function nearestFeature(pt, cats) {
   return best;
 }
 
-function skirtPoint(from, to, feature) {
-  const brg = bearingDeg(from, to);
-  const left = offsetKm(feature, brg - 90, feature.radiusKm + 80);
-  const right = offsetKm(feature, brg + 90, feature.radiusKm + 80);
-  const mid = interpolate(from, to, 0.5);
-  return haversineKm(mid, left) < haversineKm(mid, right) ? left : right;
+function featureCost(pt, mode) {
+  const severe = nearestFeature(pt, SEVERE);
+  const any = nearestFeature(pt);
+  let c = 1;
+  if (severe) {
+    const t = severe.distKm / Math.max(1, severe.radiusKm);
+    if (t < 0.55) c += mode === 'direct' ? 18 : 80;
+    else if (t < 1) c += mode === 'direct' ? 4 : 22;
+  }
+  if (any && SCIENCE.has(any.category) && mode === 'science') c *= 0.45;
+  return c;
+}
+
+/** Corridor A* so planetary routes bend around volcanoes/chasma instead of a geodesic. */
+function corridorAStar(from, dest, mode) {
+  const along = 32;
+  const offs = mode === 'direct'
+    ? [-0.4, -0.18, 0, 0.18, 0.4]
+    : mode === 'science'
+      ? [-0.85, -0.45, 0, 0.45, 0.85]
+      : [-1.25, -0.85, -0.45, 0, 0.45, 0.85, 1.25];
+  const total = Math.max(1, haversineKm(from, dest));
+  const widthKm = mode === 'direct'
+    ? Math.min(90, total * 0.07 + 14)
+    : mode === 'science'
+      ? Math.min(200, total * 0.16 + 28)
+      : Math.min(320, total * 0.26 + 48);
+  const brg = bearingDeg(from, dest);
+  const cols = offs.length, rows = along + 1;
+  const node = (i, j) => {
+    const t = i / along;
+    const base = interpolate(from, dest, t);
+    return offsetKm(base, brg + 90, offs[j] * widthKm);
+  };
+  const g = new Float32Array(rows * cols).fill(Infinity);
+  const fromIdx = new Int32Array(rows * cols).fill(-1);
+  const start = 0 * cols + ((cols / 2) | 0);
+  const goal = along * cols + ((cols / 2) | 0);
+  g[start] = 0;
+  const heap = [[start, 0]];
+  const pop = () => {
+    let b = 0;
+    for (let i = 1; i < heap.length; i++) if (heap[i][1] < heap[b][1]) b = i;
+    return heap.splice(b, 1)[0][0];
+  };
+  while (heap.length) {
+    const n = pop();
+    if (n === goal) break;
+    const i = (n / cols) | 0, j = n % cols;
+    const p = i === 0 && j === ((cols / 2) | 0) ? from : node(i, j);
+    for (let di = 0; di <= 1; di++)
+      for (let dj = -1; dj <= 1; dj++) {
+        if (!di && !dj) continue;
+        const i2 = i + di, j2 = j + dj;
+        if (i2 < 0 || i2 >= rows || j2 < 0 || j2 >= cols) continue;
+        const m = i2 * cols + j2;
+        const q = i2 === along && j2 === ((cols / 2) | 0) ? dest : node(i2, j2);
+        const step = Math.max(0.2, haversineKm(p, q));
+        const cost = g[n] + step * ((featureCost(p, mode) + featureCost(q, mode)) / 2);
+        if (cost < g[m]) {
+          g[m] = cost;
+          fromIdx[m] = n;
+          heap.push([m, cost + haversineKm(q, dest)]);
+        }
+      }
+  }
+  const cells = [];
+  for (let n = goal; n !== -1; n = fromIdx[n]) {
+    const i = (n / cols) | 0, j = n % cols;
+    cells.push(i === 0 && j === ((cols / 2) | 0) ? from : i === along && j === ((cols / 2) | 0) ? dest : node(i, j));
+    if (n === start) break;
+  }
+  cells.reverse();
+  if (cells.length < 2) return [from, dest];
+  const dense = [];
+  for (let i = 0; i < cells.length - 1; i++) dense.push(...sampleGeodesic(cells[i], cells[i + 1], 8).slice(i ? 1 : 0));
+  return dense;
 }
 
 function waypointsForMode(from, dest, mode) {
-  const straight = sampleGeodesic(from, dest, 48);
-  const hits = [];
-  const seen = new Set();
-  for (const p of straight) {
-    const f = nearestFeature(p, SEVERE);
-    if (f && !seen.has(f.name)) { seen.add(f.name); hits.push(f); }
-  }
-  if (mode === 'direct') return [from, dest];
-  if (mode === 'science') {
-    let via = null, bestOff = Infinity;
-    const total = Math.max(1, haversineKm(from, dest));
-    for (const f of HIGHLIGHTS) {
-      if (!SCIENCE.has(f.category)) continue;
-      const d0 = haversineKm(from, f), d1 = haversineKm(f, dest);
-      const extra = d0 + d1 - total;
-      if (extra > 0 && extra < total * 0.45 && extra < bestOff && d0 > 80 && d1 > 80) {
-        bestOff = extra; via = f;
-      }
-    }
-    return via ? [from, via, dest] : [from, dest];
-  }
-  const wps = [from];
-  hits.forEach((f) => wps.push({ ...skirtPoint(from, dest, f), name: `Skirt ${f.name}`, via: true }));
-  wps.push(dest);
-  return wps;
+  return corridorAStar(from, dest, mode);
 }
 
 function elevationGuess(pt, startElev, dest) {
@@ -118,13 +165,11 @@ function bandOf(p) {
   return 'safe';
 }
 
-/** Geodesic (or skirted) route on the Mars ellipsoid, with feature-based hazards. */
+/** Terrain-weighted corridor A* on the Mars ellipsoid. */
 export function generatePlanetRoute(from, dest, mode = 'safe', startElev = -2500) {
   const origin = { lat: from.lat, lon: from.lon, name: 'You' };
   const end = { lat: dest.lat, lon: dest.lon, name: dest.name };
-  const wps = waypointsForMode(origin, end, mode);
-  const raw = [];
-  for (let i = 0; i < wps.length - 1; i++) raw.push(...sampleGeodesic(wps[i], wps[i + 1], 40).slice(i ? 1 : 0));
+  const raw = waypointsForMode(origin, end, mode);
 
   let cumM = 0;
   const points = raw.map((p, i) => {
@@ -227,6 +272,5 @@ export function planetAlerts({ points, metrics, dest, km }) {
 
 export function isPlanetaryDest(from, dest) {
   if (!from || !dest || dest.lat == null || dest.lon == null) return false;
-  if (dest.planetary) return true;
   return haversineKm(from, dest) > 8;
 }

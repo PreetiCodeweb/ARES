@@ -6,15 +6,16 @@ import { fullTanks, tickPlss } from '../services/plssCalculator.js';
 import { toast } from '../lib/toast.js';
 import { geoBearing, headingLabel } from '../navigation/heading.js';
 import { advanceAlongPath, BASE_WALK_MPS, nearestIndex, pointAtDistance, sampleTerrain, snapToPath, speedFactor, walkStep } from '../navigation/movementEngine.js';
-import { alternateAdvice, nextInstruction, terrainAhead, upcomingHazard } from '../analysis/routeAnalysis.js';
+import { alternateAdvice, explainTerrainRoute, nextInstruction, safetyFromMetrics, terrainAhead, upcomingHazard } from '../analysis/routeAnalysis.js';
 import { compareNavRoutes, evaluateSafeReturn, generateReturnRoute, reachableEnvelope } from '../routing/returnRoute.js';
-import { generatePlanetRoute, isPlanetaryDest } from '../routing/planetRoute.js';
+import { generatePlanetRoute } from '../routing/planetRoute.js';
+import { destGeoOf, fallbackGeoTrack, finalizeRoute, inTacticalCanvas, stampPathGeo } from '../routing/geoPath.js';
 function fmtGeo(lat, lon) {
   return {
     lat,
     lon,
-    latStr: `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}`,
-    lonStr: `${Math.abs(lon).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`
+    latStr: `${Math.abs(lat).toFixed(5)}° ${lat >= 0 ? 'N' : 'S'}`,
+    lonStr: `${Math.abs(lon).toFixed(5)}° ${lon >= 0 ? 'E' : 'W'}`
   };
 }
 
@@ -47,7 +48,10 @@ export function NavigationProvider({ children }) {
   const [tanks, setTanks] = useState(() => fullTanks());
   const [envelope, setEnvelope] = useState([]);
   const [routeFitPulse, setRouteFitPulse] = useState(0);
+  const [rerouteOffer, setRerouteOffer] = useState(null);
   const keys = useRef({ f: 0, t: 0 });
+  const hzSeen = useRef(0);
+  const pathHold = useRef(null);
   const lastReturnAt = useRef(0);
   const live = useRef({});
 
@@ -69,6 +73,8 @@ export function NavigationProvider({ children }) {
     setEnvelope([]);
     setControlMode('observe');
     setCameraMode('orbit');
+    setRerouteOffer(null);
+    hzSeen.current = 0;
     setLocatePulse((n) => n + 1);
   }, [missionId]);
 
@@ -80,25 +86,44 @@ export function NavigationProvider({ children }) {
 
   const comparisons = useMemo(() => {
     if (!destination || !routeOrigin) return null;
-    const from = { ...originGeo, lat: originGeo.lat ?? astronaut.lat, lon: originGeo.lon ?? astronaut.lon, elevation: astronaut.elevation };
-    const destGeo = {
-      ...destination,
-      lat: destination.lat ?? canvasToMarsCoords(mission, destination.x, destination.y).lat,
-      lon: destination.lon ?? canvasToMarsCoords(mission, destination.x, destination.y).lon
+    const from = {
+      ...originGeo,
+      x: routeOrigin.x ?? astronaut.x,
+      y: routeOrigin.y ?? astronaut.y,
+      lat: originGeo.lat ?? astronaut.lat,
+      lon: originGeo.lon ?? astronaut.lon,
+      elevation: astronaut.elevation
     };
-    if (isPlanetaryDest(from, destGeo)) {
-      return {
+    const extra = destGeoOf(destination) || canvasToMarsCoords(mission, destination.x, destination.y);
+    const destGeo = { ...destination, ...extra };
+    const onGrid = inTacticalCanvas(destination.x, destination.y);
+    const pack = onGrid
+      ? compareNavRoutes(from, destGeo, missionId, routing)
+      : {
         safe: generatePlanetRoute(from, destGeo, 'safe', from.elevation),
         direct: generatePlanetRoute(from, destGeo, 'direct', from.elevation),
         science: generatePlanetRoute(from, destGeo, 'science', from.elevation)
       };
+    const tagged = {};
+    for (const id of ['safe', 'direct', 'science']) {
+      tagged[id] = finalizeRoute(mission, pack[id], from, destGeo);
+      if ((tagged[id]?.points?.length || 0) < 2 && extra.lat != null) {
+        tagged[id] = { ...(tagged[id] || {}), points: fallbackGeoTrack(from, destGeo), planetary: !onGrid };
+      }
     }
-    return compareNavRoutes(routeOrigin, destination, missionId, routing);
-  }, [destination, routeOrigin, missionId, routing, originGeo, mission]);
+    return tagged;
+  }, [destination, routeOrigin, missionId, routing, originGeo, mission, astronaut.x, astronaut.y, astronaut.lat, astronaut.lon, astronaut.elevation]);
 
-  const routed = destination && comparisons ? comparisons[routeMode] : null;
-  const activePoints = routed?.points?.length ? routed.points : (path?.points || []);
-  const activeMetrics = routed?.metrics || metrics;
+  const liveRouted = destination && comparisons ? comparisons[routeMode] : null;
+  const livePoints = useMemo(() => {
+    const raw = liveRouted?.points?.length > 1 ? liveRouted.points : (destination ? [] : (path?.points || []));
+    return stampPathGeo(mission, raw);
+  }, [liveRouted, destination, path, mission]);
+  const liveMetrics = liveRouted?.metrics || metrics;
+  const routed = liveRouted;
+  const holding = !!rerouteOffer?.previous?.points?.length;
+  const activePoints = holding ? rerouteOffer.previous.points : livePoints;
+  const activeMetrics = holding ? rerouteOffer.previous.metrics : liveMetrics;
   const rawStations = routed?.stations?.length ? routed.stations : (path?.stations || []);
   const activeStations = useMemo(() => rawStations.map((s, i) => {
     const wp = s.wp || s;
@@ -141,6 +166,7 @@ export function NavigationProvider({ children }) {
     () => alternateAdvice({ comparisons, routeMode, obstacle: upcoming, planetary: !!routed?.planetary }),
     [comparisons, routeMode, upcoming, routed?.planetary]
   );
+  const routeExplain = useMemo(() => explainTerrainRoute(comparisons, routeMode), [comparisons, routeMode]);
 
   const tanksSnap = useMemo(() => {
     const slope = geoAstro.slope || 0;
@@ -171,6 +197,42 @@ export function NavigationProvider({ children }) {
   );
 
   useEffect(() => {
+    const nHz = routing?.length || 0;
+    if (nHz > hzSeen.current && pathHold.current?.points?.length > 2) {
+      const prev = pathHold.current;
+      const extraM = Math.round(((liveMetrics.distanceKm || 0) - (prev.metrics?.distanceKm || 0)) * 1000);
+      const extraMin = Math.round((liveMetrics.estimatedTimeMin || 0) - (prev.metrics?.estimatedTimeMin || 0));
+      const h = routing[routing.length - 1];
+      let metersAhead = 320;
+      if (h && prev.points?.length) {
+        let best = prev.points[0];
+        for (const p of prev.points) {
+          if (Math.hypot(p.x - h.x, p.y - h.y) < Math.hypot(best.x - h.x, best.y - h.y)) best = p;
+        }
+        metersAhead = Math.max(40, Math.round(((best.d || 0) - (prev.points[0].d || 0)) * 5.875));
+      }
+      const blocked = (prev.points || []).filter((p) => h && Math.hypot(p.x - h.x, p.y - h.y) < (h.r || 40) + 18);
+      setRerouteOffer({
+        previous: prev,
+        proposed: { points: livePoints, metrics: liveMetrics },
+        extraM,
+        extraMin,
+        oldSafety: safetyFromMetrics(prev.metrics),
+        newSafety: safetyFromMetrics(liveMetrics),
+        metersAhead,
+        hazardKind: h?.kind || 'hazard',
+        blocked,
+        reason: 'High slope / dust risk on the current line. ARES found a traversable corridor around it.'
+      });
+      toast('Hazard on route. Review the alternate path.', 'warn');
+      hzSeen.current = nHz;
+      return;
+    }
+    hzSeen.current = nHz;
+    if (!rerouteOffer) pathHold.current = { points: livePoints, metrics: liveMetrics };
+  }, [routing?.length, livePoints, liveMetrics, rerouteOffer]);
+
+  useEffect(() => {
     if (routed?.planetary) { setEnvelope([]); return; }
     const budget = safeReturn.budgetMeters;
     const bin = following ? 48 : 16;
@@ -182,11 +244,11 @@ export function NavigationProvider({ children }) {
 
   live.current = {
     mission, missionId, routing, astronaut, following, followSpeed, controlMode, stick,
-    activePoints, alongPx
+    activePoints, alongPx, planetary: !!routed?.planetary
   };
 
   const applyPose = useCallback((next, movedM = 0) => {
-    const geo = (next.lat != null && next.lon != null)
+    const geo = (live.current.planetary && next.lat != null && next.lon != null)
       ? fmtGeo(next.lat, next.lon)
       : canvasToMarsCoords(mission, next.x, next.y);
     setAstronaut((prev) => ({ ...prev, ...next, ...geo }));
@@ -230,7 +292,7 @@ export function NavigationProvider({ children }) {
 
       if (L.following && L.activePoints.length > 1) {
         const factor = speedFactor(sampleTerrain(L.missionId, L.astronaut.x, L.astronaut.y, L.routing));
-        const meters = BASE_WALK_MPS * factor * L.followSpeed * dt;
+        const meters = BASE_WALK_MPS * factor * Math.max(1, L.followSpeed) * dt;
         const stepped = advanceAlongPath(L.activePoints, L.alongPx, meters, L.missionId, L.routing);
         if (stepped) {
           applyPose(stepped.pose, meters);
@@ -255,7 +317,7 @@ export function NavigationProvider({ children }) {
       }
 
       burn((dt / 60) * 0.35, false, L.astronaut.slope, L.astronaut.zone);
-    }, 100);
+    }, 50);
     return () => clearInterval(id);
   }, [applyPose, burn]);
 
@@ -270,11 +332,23 @@ export function NavigationProvider({ children }) {
 
   const locateAstronaut = () => setLocatePulse((n) => n + 1);
 
-  const relocateTo = (x, y, heading) => {
+  const acceptReroute = () => {
+    const next = rerouteOffer?.proposed;
+    setRerouteOffer(null);
+    if (next?.points?.length) {
+      const snap = snapToPath(next.points, astronaut.x, astronaut.y);
+      setAlongPx(snap.alongPx);
+      const pt = next.points[snap.idx];
+      if (pt) applyPose({ ...pt, heading: pt.heading || geoBearing(pt, next.points[Math.min(next.points.length - 1, snap.idx + 1)]) }, 0);
+    }
+    toast('Route updated. Following the terrain-aware alternate.', 'ok');
+  };
+
+  const relocateTo = (x, y, heading, keepFollow = false) => {
     const pose = poseFrom(mission, missionId, x, y, heading ?? astronaut.heading, routing);
     applyPose(pose, 0);
     setAlongPx(snapToPath(activePoints, x, y).alongPx);
-    setFollowing(false);
+    if (!keepFollow) setFollowing(false);
   };
 
   const setDestination = (dest) => {
@@ -283,21 +357,22 @@ export function NavigationProvider({ children }) {
       setRouteOrigin(null);
       return;
     }
-    const canvas = dest.mapPos || (dest.x != null ? dest : null);
-    const geo = dest.lat != null
-      ? { lat: dest.lat, lon: dest.lon }
-      : canvas
-        ? canvasToMarsCoords(mission, canvas.x, canvas.y)
-        : null;
+    const canvas = dest.mapPos || (dest.x != null && dest.y != null ? dest : null);
+    const nested = destGeoOf(dest);
+    const geo = nested || (canvas ? canvasToMarsCoords(mission, canvas.x, canvas.y) : null);
+    const projected = geo ? marsToCanvasCoords(mission, geo.lat, geo.lon) : { x: canvas?.x, y: canvas?.y };
+    const x = Number.isFinite(canvas?.x) ? canvas.x : projected.x;
+    const y = Number.isFinite(canvas?.y) ? canvas.y : projected.y;
+    const onGrid = inTacticalCanvas(x, y);
     const point = {
       id: dest.id || `place-${Date.now()}`,
       name: dest.name || 'Map pin',
       type: dest.type || dest.category || 'place',
       category: dest.category,
       diameter: dest.diameter,
-      planetary: !!dest.planetary || dest.lat != null,
-      x: canvas?.x ?? astronaut.x,
-      y: canvas?.y ?? astronaut.y,
+      planetary: !!dest.planetary || !onGrid,
+      x,
+      y,
       ...geo
     };
     setRouteOrigin({ x: astronaut.x, y: astronaut.y, lat: astronaut.lat, lon: astronaut.lon });
@@ -305,6 +380,7 @@ export function NavigationProvider({ children }) {
     setControlMode('navigate');
     setAlongPx(0);
     setFollowing(false);
+    setRerouteOffer(null);
     setRouteFitPulse((n) => n + 1);
     toast(`Routing from your position to ${point.name}`, 'ok');
   };
@@ -321,13 +397,16 @@ export function NavigationProvider({ children }) {
 
   const handlePlaceSelect = (place) => {
     if (!place || place.lat == null) return;
+    const { x, y } = marsToCanvasCoords(mission, place.lat, place.lon);
     setDestination({
       id: place.id || place.name,
       name: place.name,
       type: 'place',
       category: place.category,
       diameter: place.diameter,
-      planetary: true,
+      planetary: !inTacticalCanvas(x, y),
+      x,
+      y,
       lat: place.lat,
       lon: place.lon
     });
@@ -335,9 +414,9 @@ export function NavigationProvider({ children }) {
 
   const handleMapClick = (lat, lon, extra = {}) => {
     const { x, y } = marsToCanvasCoords(mission, lat, lon);
-    const inTactical = x >= 0 && y >= 0 && x <= 800 && y <= 600;
+    const onGrid = inTacticalCanvas(x, y);
     if (clickIntent === 'relocate') {
-      if (!inTactical) {
+      if (!onGrid) {
         toast('Crew relocate stays inside this site’s tactical box. Use a nearby pin.', 'warn');
         return;
       }
@@ -345,11 +424,18 @@ export function NavigationProvider({ children }) {
       toast('Crew relocated to map pin', 'info');
       return;
     }
-    if (extra.name || !inTactical) {
-      handlePlaceSelect({ lat, lon, name: extra.name || 'Map pin', category: extra.category, id: extra.id, diameter: extra.diameter, planetary: !inTactical });
-      return;
-    }
-    setDestination({ id: `pin-${Date.now()}`, name: extra.name || 'Map pin', type: 'waypoint', x, y, lat, lon });
+    setDestination({
+      id: extra.id || `pin-${Date.now()}`,
+      name: extra.name || 'Map pin',
+      type: extra.name ? 'place' : 'waypoint',
+      category: extra.category,
+      diameter: extra.diameter,
+      planetary: !onGrid,
+      x,
+      y,
+      lat,
+      lon
+    });
   };
 
   const beginTraverse = () => {
@@ -369,13 +455,14 @@ export function NavigationProvider({ children }) {
       }, 0);
       if (activeMetrics.distanceKm > 12) toast('Preview only: this destination is beyond suited EVA range.', 'warn');
     } else {
-      relocateTo(start.x, start.y, geoBearing(start, next));
+      relocateTo(start.x, start.y, geoBearing(start, next), true);
     }
     setAlongPx(0);
     setControlMode('navigate');
     const longHaul = !!routed?.planetary && (activeMetrics.distanceKm || 0) > 12;
-    if (!longHaul) setCameraMode('astronaut');
+    setCameraMode(longHaul ? 'orbit' : 'astronaut');
     setFollowing(true);
+    toast('Walking the solved path. Heading-up GPS follow is on.', 'ok');
   };
 
   const seekProgress = (p) => {
@@ -417,22 +504,22 @@ export function NavigationProvider({ children }) {
           elevation: start.elevation, slope: start.slope || 0
         }, 0);
       } else {
-        relocateTo(start.x, start.y, geoBearing(start, next));
+        relocateTo(start.x, start.y, geoBearing(start, next), true);
       }
       setAlongPx(0);
     } else if (!routed?.planetary) {
       const snap = snapToPath(activePoints, astronaut.x, astronaut.y);
       const target = activePoints[snap.idx];
       if (target && Math.hypot(astronaut.x - target.x, astronaut.y - target.y) > 24) {
-        relocateTo(target.x, target.y, target.heading || astronaut.heading);
+        relocateTo(target.x, target.y, target.heading || geoBearing(target, activePoints[Math.min(activePoints.length - 1, snap.idx + 1)]), true);
         setAlongPx(snap.alongPx);
       }
     }
     setControlMode('navigate');
     const longHaul = !!routed?.planetary && (activeMetrics.distanceKm || 0) > 12;
-    if (!longHaul) setCameraMode('astronaut');
+    setCameraMode(longHaul ? 'orbit' : 'astronaut');
     setFollowing(true);
-    toast('GPS follow on. Heading-up view along the solved path.', 'info');
+    toast('GPS follow on. You should see yourself moving along the path.', 'info');
   };
 
   const value = {
@@ -449,11 +536,14 @@ export function NavigationProvider({ children }) {
     traveledM, traveledKm: traveledM / 1000, elapsedMin,
     locatePulse, locateAstronaut, routeFitPulse,
     points: activePoints, stations: activeStations, metrics: activeMetrics,
-    comparisons, instruction, ahead, upcoming, alternate, plss, assessment,
+    comparisons, instruction, ahead, upcoming, alternate, routeExplain, plss, assessment,
     returnRoute, safeReturn, envelope,
     headingText: headingLabel(geoAstro.heading),
     stick, setStick,
     setDestination, returnToBase, relocateTo, handleMapClick, handlePlaceSelect, resetCrew, seekProgress,
+    rerouteOffer, acceptReroute, dismissReroute: () => setRerouteOffer(null),
+    proposedPoints: rerouteOffer?.proposed?.points || [],
+    blockedPoints: rerouteOffer?.blocked || [],
     routeAlerts: routed?.alerts || [],
     planetary: !!routed?.planetary,
     remainingKm: instruction.remainingKm,

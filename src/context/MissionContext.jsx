@@ -102,8 +102,8 @@ export function MissionProvider({ children }) {
     later(1700, () => {
       const re = calculateRouteMetrics(generateDensePath(L.waypoints, L.missionId, L.routeMode, [...L.routing, { x: at.x, y: at.y, r: k.r }]).points);
       const dKm = ((re.distanceKm - L.metrics.distanceKm) * 1000) | 0, dMin = re.estimatedTimeMin - L.metrics.estimatedTimeMin;
-      if (L.routeMode === 'direct') { step(4, 'Direct mode ignores hazards', 'Switch to Safe path to publish a replacement route.', 'warn'); toast('Direct mode will not avoid the hazard. Switch to Safe path.', 'warn'); }
-      else { step(4, 'Replacement route published', `${dKm >= 0 ? '+' : ''}${dKm} m, ${dMin >= 0 ? '+' : ''}${dMin} min. Tagged hazard v${v}.`); toast(`Replacement route ready (${dKm >= 0 ? '+' : ''}${dKm} m)`, 'ok'); }
+      step(4, 'A* replacement published', `${dKm >= 0 ? '+' : ''}${dKm} m, ${dMin >= 0 ? '+' : ''}${dMin} min. Terrain costs include the new hazard.`);
+      toast(`Terrain-aware reroute ready (${dKm >= 0 ? '+' : ''}${dKm} m)`, 'ok');
     });
   }, [hzMap]);
 

@@ -172,8 +172,7 @@ export function DecisionProvider({ children }) {
       if (!res) return;
       setHazardAlert(res);
       if (res.route_affected) {
-        toast(res.message || 'Reroute required', 'warn', 'Decision engine: generate a safer path.');
-        if (m.routeMode === 'direct') m.setRouteMode('safe');
+        toast(res.message || 'Reroute required', 'warn', 'Accept the terrain-aware alternate on the map.');
       }
     })();
   }, [engineOnline, record?.mission_id, m.routing?.length]);

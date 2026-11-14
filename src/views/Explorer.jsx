@@ -18,9 +18,9 @@ const MODES = [
   { id: 'science', label: 'Science', icon: 'flask', hint: 'Detours through nearby high-value targets' }
 ];
 const COPY = {
-  safe: 'From where you stand: local A* or a planetary path that skirts volcanoes and chasma.',
-  direct: 'Shortest geodesic from you to the place you clicked. Hazards are flagged, not avoided.',
-  science: 'Bends toward nearby high-value features, then continues to your destination.'
+  safe: 'A* with high slope and hazard costs. The polyline bends around scarps, dunes and reported events.',
+  direct: 'A* with cheaper terrain costs — still not a straight line. Faster, more slope exposure.',
+  science: 'A* plus vias through nearby high-value targets, still blocked by extreme slope.'
 };
 
 function Glance() {

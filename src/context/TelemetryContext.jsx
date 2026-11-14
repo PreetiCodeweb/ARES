@@ -49,7 +49,8 @@ export function TelemetryProvider({ children }) {
     alerts,
     toggle: () => {
       if (!n.points.length) return toast('Choose a destination or keep the planned traverse', 'warn');
-      n.toggleFollow();
+      if (!n.following && (n.progress || 0) < 0.02) n.beginTraverse();
+      else n.toggleFollow();
     },
     reset: () => { n.setFollowing(false); n.resetCrew(); }
   }), [n, hr, alerts]);

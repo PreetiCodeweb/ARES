@@ -1,8 +1,9 @@
-import { generateDensePath, calculateRouteMetrics, gridFor, inReported, SLOPE_LIMIT } from '../services/pathSolver.js';
+import { generateDensePath, calculateRouteMetrics, gridFor, inReported, SLOPE_LIMIT, GRID } from '../services/pathSolver.js';
 import { METERS_PER_PIXEL } from '../services/coordinates.js';
 import { PLSS_SPECS } from '../services/plssCalculator.js';
 
-const W = 800, H = 600, CELL = 16, NX = W / CELL, NY = Math.ceil(H / CELL);
+const { W, H, CELL } = GRID;
+const NX = W / CELL, NY = Math.ceil(H / CELL);
 
 export function crewStop(p, name = 'You') {
   return { id: 'crew', name, x: p.x, y: p.y, type: 'crew' };

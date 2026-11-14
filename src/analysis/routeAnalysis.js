@@ -1,6 +1,6 @@
-import { SLOPE_LIMIT } from '../services/pathSolver.js';
+import { SLOPE_LIMIT, safetyFromMetrics } from '../services/pathSolver.js';
 import { pixelsToKm, pixelsToMeters } from '../services/coordinates.js';
-import { cardinal, geoBearing, headingBetween } from '../navigation/heading.js';
+import { cardinal, geoBearing } from '../navigation/heading.js';
 
 const band = (slope, zone, reported) => {
   if (reported || slope > SLOPE_LIMIT) return 'hazard';
@@ -124,4 +124,22 @@ export function alternateAdvice({ comparisons, routeMode, obstacle, planetary })
     title: `${obstacle.name} in ${obstacle.meters} m`,
     text: 'You are already on the safest solved path. Slow down, or abort to habitat if the slope keeps climbing.'
   };
+}
+
+export { safetyFromMetrics };
+
+/** Explain why the A* path is not the geodesic, using live metrics. */
+export function explainTerrainRoute(comparisons, routeMode) {
+  const cur = comparisons?.[routeMode];
+  const fastest = comparisons?.direct;
+  const safest = comparisons?.safe;
+  if (!cur || !fastest) return null;
+  const ds = fastest.metrics?.maxSlope || 0;
+  const extraM = Math.round(((safest?.metrics?.distanceKm || 0) - (fastest.metrics?.distanceKm || 0)) * 1000);
+  const extraMin = Math.round((safest?.metrics?.estimatedTimeMin || 0) - (fastest.metrics?.estimatedTimeMin || 0));
+  const oldS = safetyFromMetrics(fastest.metrics);
+  const newS = safetyFromMetrics(safest?.metrics || cur.metrics);
+  const zones = fastest.metrics?.zoneSamples || 0;
+  const text = `The direct path is not recommended because it crosses a ${ds.toFixed(0)}° slope${zones ? ' and a high-risk terrain zone' : ''}. ARES generated an alternative route that ${extraM >= 0 ? 'increases' : 'changes'} travel distance by ${Math.abs(extraM)} m while improving predicted route safety from ${oldS}% to ${newS}%.`;
+  return { text, extraM, extraMin, oldSafety: oldS, newSafety: newS, maxSlopeDirect: ds, currentSafety: safetyFromMetrics(cur.metrics) };
 }

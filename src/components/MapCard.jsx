@@ -41,6 +41,14 @@ export const MapCard = memo(function MapCard() {
       home: geo(N.home),
       destination: N.destination ? geo(N.destination) : null,
       route: pointsToGeo(M.mission, N.points),
+      routeMode: M.routeMode,
+      alts: N.comparisons ? {
+        safe: pointsToGeo(M.mission, N.comparisons.safe?.points),
+        direct: pointsToGeo(M.mission, N.comparisons.direct?.points),
+        science: pointsToGeo(M.mission, N.comparisons.science?.points)
+      } : null,
+      proposed: pointsToGeo(M.mission, N.proposedPoints),
+      blocked: pointsToGeo(M.mission, N.blockedPoints),
       returnRoute: planetary ? [] : pointsToGeo(M.mission, N.returnRoute.points),
       envelope: planetary ? [] : (N.envelope || []).map((p) => canvasToLatLon(M.mission, p.x, p.y)),
       hazards: planetary ? [] : M.hazards.map((h) => ({ ...canvasToLatLon(M.mission, h.x, h.y), rMeters: h.r * METERS_PER_PIXEL })),
@@ -82,7 +90,7 @@ export const MapCard = memo(function MapCard() {
 
   useEffect(() => {
     pushState();
-  }, [n.cameraMode, n.destination, n.points, m.hazards, m.pois, m.missionId, n.home, n.following]);
+  }, [n.cameraMode, n.destination, n.points, n.comparisons, n.rerouteOffer, m.routeMode, m.hazards, m.pois, m.missionId, n.home, n.following]);
 
   useEffect(() => {
     if (n.following) return;

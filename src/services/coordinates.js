@@ -15,10 +15,10 @@ export function canvasToMarsCoords(mission, x, y) {
   const lat = maxLat - (y / 600) * latSpan;
 
   return {
-    lat: Number(lat.toFixed(4)),
-    lon: Number(lon.toFixed(4)),
-    latStr: `${Math.abs(lat).toFixed(4)}° ${lat >= 0 ? 'N' : 'S'}`,
-    lonStr: `${Math.abs(lon).toFixed(4)}° ${lon >= 0 ? 'E' : 'W'}`
+    lat,
+    lon,
+    latStr: `${Math.abs(lat).toFixed(5)}° ${lat >= 0 ? 'N' : 'S'}`,
+    lonStr: `${Math.abs(lon).toFixed(5)}° ${lon >= 0 ? 'E' : 'W'}`
   };
 }
 

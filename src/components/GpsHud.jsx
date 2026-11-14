@@ -37,7 +37,21 @@ export function GpsHud() {
           {upcoming.slope > 8 && <p>Slope {upcoming.slope.toFixed(1)}° on the current line.</p>}
         </div>
       )}
-      {alt && upcoming && (
+      {n.rerouteOffer && (
+        <div className="gps-alert fail">
+          <div className="gps-alert-title">⚠ HAZARD DETECTED · {n.rerouteOffer.metersAhead} m ahead</div>
+          <p>
+            {n.rerouteOffer.reason}<br />
+            Current safety {n.rerouteOffer.oldSafety}% → alternate {n.rerouteOffer.newSafety}% ·
+            {n.rerouteOffer.extraM >= 0 ? ' +' : ' '}{n.rerouteOffer.extraM} m ·
+            {n.rerouteOffer.extraMin >= 0 ? ' +' : ' '}{n.rerouteOffer.extraMin} min
+          </p>
+          <button type="button" className="btn btn-pri !min-h-9 !text-[12px] mt-2" onClick={n.acceptReroute}>
+            <Icon n="route" s={14} />Accept reroute
+          </button>
+        </div>
+      )}
+      {alt && upcoming && !n.rerouteOffer && (
         <div className="gps-alert alt">
           <div className="gps-alert-title">{alt.title}</div>
           <p>{alt.text}</p>

@@ -47,26 +47,63 @@ export function attachAresBridge({ viewer }) {
   viewer.dataSources.add(routeDs);
   const closeDock = () => dock?.classList.remove('open');
   const H = 28000;
+  let lastYou = null;
   viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#5a3228');
+
+  function chevronIcon() {
+    const c = document.createElement('canvas');
+    c.width = 72; c.height = 72;
+    const g = c.getContext('2d');
+    g.translate(36, 36);
+    g.beginPath();
+    g.moveTo(0, -26);
+    g.lineTo(22, 24);
+    g.lineTo(0, 12);
+    g.lineTo(-22, 24);
+    g.closePath();
+    g.fillStyle = '#e4613a';
+    g.strokeStyle = '#ffffff';
+    g.lineWidth = 4;
+    g.fill();
+    g.stroke();
+    return c.toDataURL();
+  }
+  const YOU_ICON = chevronIcon();
 
   const you = ds.entities.add({
     id: 'ares-you',
     name: 'YOU',
     position: degrees({ lat: 18.38, lon: 77.58, height: 12 }),
+    billboard: {
+      image: YOU_ICON,
+      width: 44,
+      height: 44,
+      alignedAxis: Cesium.Cartesian3.UNIT_Z,
+      rotation: new Cesium.CallbackProperty(() => -Cesium.Math.toRadians(lastYou?.heading || 0), false),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY
+    },
     point: {
-      pixelSize: 14,
+      pixelSize: 10,
       color: Cesium.Color.fromCssColorString('#e4613a'),
       outlineColor: Cesium.Color.WHITE,
-      outlineWidth: 3,
+      outlineWidth: 2,
       disableDepthTestDistance: Number.POSITIVE_INFINITY
+    },
+    ellipse: {
+      semiMajorAxis: 18,
+      semiMinorAxis: 18,
+      material: Cesium.Color.fromCssColorString('#e4613a').withAlpha(0.28),
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString('#e4613a').withAlpha(0.9),
+      height: 8
     },
     label: {
       text: 'YOU',
-      font: '700 11px Inter, sans-serif',
+      font: '700 13px Inter, sans-serif',
       fillColor: Cesium.Color.WHITE,
       showBackground: true,
-      backgroundColor: Cesium.Color.fromCssColorString('#0d0a10').withAlpha(0.82),
-      pixelOffset: new Cesium.Cartesian2(0, -22),
+      backgroundColor: Cesium.Color.fromCssColorString('#0d0a10').withAlpha(0.88),
+      pixelOffset: new Cesium.Cartesian2(0, -32),
       disableDepthTestDistance: Number.POSITIVE_INFINITY
     }
   });
@@ -75,9 +112,20 @@ export function attachAresBridge({ viewer }) {
     id: 'ares-heading',
     polyline: {
       positions: [],
-      width: 3,
-      material: Cesium.Color.fromCssColorString('#f4efe9'),
-      clampToGround: false
+      width: 14,
+      material: new Cesium.PolylineArrowMaterialProperty(Cesium.Color.fromCssColorString('#f4efe9')),
+      clampToGround: false,
+      arcType: Cesium.ArcType.NONE
+    }
+  });
+  const headingGlow = ds.entities.add({
+    id: 'ares-heading-glow',
+    polyline: {
+      positions: [],
+      width: 6,
+      material: Cesium.Color.fromCssColorString('#e4613a').withAlpha(0.55),
+      clampToGround: false,
+      arcType: Cesium.ArcType.NONE
     }
   });
 
@@ -123,7 +171,8 @@ export function attachAresBridge({ viewer }) {
 
   const route = ds.entities.add({
     id: 'ares-route',
-    polyline: { positions: [], width: 5, material: Cesium.Color.fromCssColorString('#e4613a'), clampToGround: false, arcType: Cesium.ArcType.GEODESIC }
+    show: false,
+    polyline: { positions: [], width: 5, material: Cesium.Color.fromCssColorString('#e4613a'), clampToGround: false, arcType: Cesium.ArcType.NONE }
   });
   const returnPath = ds.entities.add({
     id: 'ares-return',
@@ -132,7 +181,7 @@ export function attachAresBridge({ viewer }) {
       width: 2.4,
       material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.fromCssColorString('#7fc8cc'), dashLength: 14 }),
       clampToGround: false,
-      arcType: Cesium.ArcType.GEODESIC
+      arcType: Cesium.ArcType.NONE
     }
   });
   const envelope = ds.entities.add({
@@ -147,7 +196,6 @@ export function attachAresBridge({ viewer }) {
 
   const extras = [];
   let cameraMode = 'orbit';
-  let lastYou = null;
   let lastRoute = [];
   let framed = false;
   let is2D = false;
@@ -162,7 +210,7 @@ export function attachAresBridge({ viewer }) {
       width: 3.5,
       material: Cesium.Color.fromCssColorString('#8a7f90').withAlpha(0.85),
       clampToGround: false,
-      arcType: Cesium.ArcType.GEODESIC
+      arcType: Cesium.ArcType.NONE
     }
   });
   const remaining = ds.entities.add({
@@ -176,7 +224,7 @@ export function attachAresBridge({ viewer }) {
         color: Cesium.Color.fromCssColorString('#7fc8cc')
       }),
       clampToGround: false,
-      arcType: Cesium.ArcType.GEODESIC
+      arcType: Cesium.ArcType.NONE
     }
   });
   const nextHz = ds.entities.add({
@@ -207,15 +255,22 @@ export function attachAresBridge({ viewer }) {
     hazard: '#ff6b6b'
   };
 
+  function surfaceHeight(lon, lat, extra = 18) {
+    const carto = Cesium.Cartographic.fromDegrees(lon, lat);
+    const sampled = viewer.scene.globe.getHeight(carto);
+    return (Number.isFinite(sampled) ? sampled : 0) + extra;
+  }
+
+  function cartAt(lat, lon, extra = 16) {
+    return Cesium.Cartesian3.fromDegrees(lon, lat, surfaceHeight(lon, lat, extra));
+  }
+
   function linePositions(pts) {
     if (!pts?.length) return [];
-    const hOff = followOn ? 30 : H;
-    return pts.map((p) => {
-      const carto = Cesium.Cartographic.fromDegrees(p.lon, p.lat);
-      const sampled = viewer.scene.globe.getHeight(carto);
-      const z = (Number.isFinite(sampled) ? sampled : 0) + hOff;
-      return Cesium.Cartesian3.fromDegrees(p.lon, p.lat, followOn ? z : H);
-    });
+    const extra = followOn ? 14 : 22;
+    return pts
+      .filter((p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon))
+      .map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, surfaceHeight(p.lon, p.lat, extra)));
   }
 
   function offset(lat, lon, heading, meters) {
@@ -225,21 +280,49 @@ export function attachAresBridge({ viewer }) {
     return { lat: lat + dLat, lon: lon + dLon };
   }
 
-  function routeKey(pts) {
-    if (!pts?.length) return '';
+  function routeKey(s) {
+    const pts = s?.route || s || [];
+    if (!pts.length && !s?.routeMode) return '';
+    if (s?.route) {
+      const a = s.route[0], b = s.route[s.route.length - 1];
+      return `${s.routeMode}:${s.route.length}:${a?.lat}:${b?.lat}:${s.alts?.safe?.length || 0}:${s.proposed?.length || 0}:${s.blocked?.length || 0}`;
+    }
     const a = pts[0], b = pts[pts.length - 1];
     return `${pts.length}:${a?.lat}:${a?.lon}:${b?.lat}:${b?.lon}`;
+  }
+
+  const chevrons = [];
+  function paintChevrons(pts) {
+    chevrons.forEach((e) => { try { ds.entities.remove(e); } catch { /* empty */ } });
+    chevrons.length = 0;
+    if (!pts || pts.length < 3) return;
+    const step = Math.max(3, Math.floor(pts.length / 9));
+    for (let i = 0; i < pts.length - 2 && chevrons.length < 10; i += step) {
+      const a = pts[i], b = pts[Math.min(pts.length - 1, i + 2)];
+      chevrons.push(ds.entities.add({
+        polyline: {
+          positions: linePositions([a, b]),
+          width: followOn ? 12 : 9,
+          material: new Cesium.PolylineArrowMaterialProperty(Cesium.Color.fromCssColorString('#f4efe9')),
+          clampToGround: false,
+          arcType: Cesium.ArcType.NONE
+        }
+      }));
+    }
   }
 
   function splitProgress(progress) {
     if (!lastRoute.length) {
       traveled.polyline.positions = [];
       remaining.polyline.positions = [];
+      paintChevrons([]);
       return;
     }
     const cut = Math.max(1, Math.min(lastRoute.length - 1, Math.round((progress || 0) * (lastRoute.length - 1))));
     traveled.polyline.positions = linePositions(lastRoute.slice(0, cut + 1));
-    remaining.polyline.positions = linePositions(lastRoute.slice(Math.max(0, cut - 1)));
+    const rest = lastRoute.slice(Math.max(0, cut - 1));
+    remaining.polyline.positions = linePositions(rest);
+    paintChevrons(rest);
   }
 
   function setFollow(on) {
@@ -265,24 +348,25 @@ export function attachAresBridge({ viewer }) {
 
   function followCamera() {
     if (!followOn || !lastYou) return;
-    const a = 0.16;
-    smooth.lat += (lastYou.lat - smooth.lat) * a;
-    smooth.lon += (lastYou.lon - smooth.lon) * a;
+    const chase = lastYou.cameraMode !== 'orbit';
+    const a = 0.28;
+    const look = offset(lastYou.lat, lastYou.lon, lastYou.heading || 0, chase ? 28 : 6);
+    smooth.lat += (look.lat - smooth.lat) * a;
+    smooth.lon += (look.lon - smooth.lon) * a;
     let dh = (lastYou.heading || 0) - smooth.heading;
     while (dh > 180) dh -= 360;
     while (dh < -180) dh += 360;
     smooth.heading += dh * a;
-    const wantRange = Math.min(2400, Math.max(520, (lastYou.remainingKm || 0.5) * 850));
-    smooth.range += (wantRange - smooth.range) * 0.08;
-    const carto = Cesium.Cartographic.fromDegrees(smooth.lon, smooth.lat);
-    const sampled = viewer.scene.globe.getHeight(carto);
-    const alt = (Number.isFinite(sampled) ? sampled : 0) + 24;
-    const target = Cesium.Cartesian3.fromDegrees(smooth.lon, smooth.lat, alt);
+    const wantRange = chase
+      ? Math.min(340, Math.max(130, (lastYou.remainingKm || 0.3) * 70 + 150))
+      : Math.min(480, Math.max(200, (lastYou.remainingKm || 0.3) * 90 + 180));
+    smooth.range += (wantRange - smooth.range) * 0.18;
+    const target = cartAt(smooth.lat, smooth.lon, 10);
     viewer.camera.lookAt(
       target,
       new Cesium.HeadingPitchRange(
         Cesium.Math.toRadians(smooth.heading),
-        Cesium.Math.toRadians(-50),
+        Cesium.Math.toRadians(chase ? -26 : -58),
         smooth.range
       )
     );
@@ -295,7 +379,7 @@ export function attachAresBridge({ viewer }) {
     lastYou = youState;
     if (youState.cameraMode) cameraMode = youState.cameraMode;
     const longHaul = !!(youState.planetary && (youState.remainingKm || 0) > 12);
-    setFollow(!!youState.following && cameraMode === 'astronaut' && !longHaul);
+    setFollow(!!youState.following && !longHaul);
     if (followOn) {
       try { viewer.camera.cancelFlight(); } catch { /* empty */ }
     }
@@ -304,10 +388,16 @@ export function attachAresBridge({ viewer }) {
     const alt = (Number.isFinite(sampled) ? sampled : 0) + 16;
     const pos = Cesium.Cartesian3.fromDegrees(youState.lon, youState.lat, alt);
     you.position = pos;
-    const tip = offset(youState.lat, youState.lon, youState.heading || 0, 140);
+    const near = offset(youState.lat, youState.lon, youState.heading || 0, 12);
+    const tip = offset(youState.lat, youState.lon, youState.heading || 0, followOn ? 55 : 90);
+    const glowTip = offset(youState.lat, youState.lon, youState.heading || 0, followOn ? 32 : 55);
     headingLine.polyline.positions = [
+      Cesium.Cartesian3.fromDegrees(near.lon, near.lat, alt),
+      Cesium.Cartesian3.fromDegrees(tip.lon, tip.lat, surfaceHeight(tip.lon, tip.lat, 16))
+    ];
+    headingGlow.polyline.positions = [
       Cesium.Cartesian3.fromDegrees(youState.lon, youState.lat, alt),
-      Cesium.Cartesian3.fromDegrees(tip.lon, tip.lat, alt)
+      Cesium.Cartesian3.fromDegrees(glowTip.lon, glowTip.lat, surfaceHeight(glowTip.lon, glowTip.lat, 16))
     ];
     if (youState.progress != null) splitProgress(youState.progress);
     if (youState.upcoming?.lat != null && youState.upcoming?.lon != null) {
@@ -317,41 +407,64 @@ export function attachAresBridge({ viewer }) {
     } else nextHz.show = false;
   }
 
-  function addLine(pts, color, width, glow, meta) {
+  function addLine(pts, color, width, glow, meta, planetary) {
     if (!pts || pts.length < 2) return;
+    const positions = linePositions(pts);
+    if (positions.length < 2) return;
+    const local = !planetary || pts.length > 6;
     const ent = routeDs.entities.add({
       polyline: {
-        positions: linePositions(pts),
+        positions,
         width,
         material: glow
           ? new Cesium.PolylineGlowMaterialProperty({ glowPower: 0.22, taperPower: 0.8, color: Cesium.Color.fromCssColorString(color) })
-          : Cesium.Color.fromCssColorString(color),
+          : Cesium.Color.fromCssColorString(color).withAlpha(0.85),
         clampToGround: false,
-        arcType: Cesium.ArcType.GEODESIC,
-        depthFailMaterial: Cesium.Color.fromCssColorString(color).withAlpha(0.25)
+        arcType: local ? Cesium.ArcType.NONE : Cesium.ArcType.GEODESIC,
+        depthFailMaterial: Cesium.Color.fromCssColorString(color).withAlpha(0.35)
       }
     });
     if (meta) ent.aresHazard = meta;
     return ent;
   }
 
-  function paintRoute(pts) {
+  const MODE_COL = { safe: '#6fd6a3', direct: '#5b9cff', science: '#c084fc' };
+
+  function paintRoute(pts, s = {}) {
     routeDs.entities.removeAll();
-    if (!pts?.length) {
-      route.polyline.positions = [];
-      return;
+    route.show = false;
+    route.polyline.positions = [];
+    if (!pts?.length) return;
+    const planetary = !!s.planetary;
+    if (s.alts) {
+      ['safe', 'direct', 'science'].forEach((id) => {
+        if (id === s.routeMode) return;
+        addLine(s.alts[id], MODE_COL[id], 3.4, false, null, planetary);
+      });
     }
-    route.polyline.positions = linePositions(pts);
-    route.polyline.clampToGround = false;
-    route.show = true;
-    addLine(pts, '#1a0c0a', 12, false);
-    addLine(pts, '#e4613a', 6.5, true);
+    addLine(pts, '#1a0c0a', 16, false, null, planetary);
+    addLine(pts, MODE_COL[s.routeMode] || '#e4613a', 8, true, null, planetary);
+    pts.forEach((p) => {
+      if (!p.turn || p.lat == null) return;
+      routeDs.entities.add({
+        position: cartAt(p.lat, p.lon, 20),
+        point: {
+          pixelSize: 11,
+          color: Cesium.Color.fromCssColorString('#f4efe9'),
+          outlineColor: Cesium.Color.fromCssColorString('#1a0c0a'),
+          outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      });
+    });
+    if (s.proposed?.length > 1) addLine(s.proposed, '#6fd6a3', 5.5, true, null, planetary);
+    if (s.blocked?.length > 1) addLine(s.blocked, '#ff6b6b', 12, true, null, planetary);
     let run = [pts[0]];
     let band = pts[0].band || (pts[0].hazard ? 'hazard' : 'safe');
     const flush = () => {
       if (run.length < 2) return;
       const meta = (band === 'hazard' || band === 'caution') ? hazardMeta(run.find((p) => p.hazardName) || run[0]) : null;
-      addLine(run, BAND_COLOR[band] || BAND_COLOR.safe, band === 'hazard' ? 10 : 5.5, band === 'hazard', meta);
+      addLine(run, BAND_COLOR[band] || BAND_COLOR.safe, band === 'hazard' ? 10 : 5.5, band === 'hazard', meta, planetary);
       if (meta) {
         const pick = routeDs.entities.add({
           polyline: {
@@ -380,36 +493,51 @@ export function attachAresBridge({ viewer }) {
   function flyRoute(pts) {
     if (!pts?.length || followOn) return;
     if (embedded) closeDock();
-    const a = pts[0], b = pts[pts.length - 1];
-    let lon1 = a.lon, lon2 = b.lon;
-    let dLonWrap = lon2 - lon1;
-    while (dLonWrap > 180) { lon2 -= 360; dLonWrap -= 360; }
-    while (dLonWrap < -180) { lon2 += 360; dLonWrap += 360; }
-    const mid = { lat: (a.lat + b.lat) / 2, lon: ((lon1 + lon2) / 2 + 540) % 360 - 180 };
+    const valid = pts.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+    if (valid.length < 2) return;
+    const lats = valid.map((p) => p.lat);
+    const lons = valid.map((p) => {
+      let lon = p.lon;
+      const d = lon - valid[0].lon;
+      if (d > 180) lon -= 360;
+      if (d < -180) lon += 360;
+      return lon;
+    });
+    const mid = { lat: (Math.min(...lats) + Math.max(...lats)) / 2, lon: (Math.min(...lons) + Math.max(...lons)) / 2 };
+    const kmLat = (Math.max(...lats) - Math.min(...lats)) * 111.2;
+    const kmLon = (Math.max(...lons) - Math.min(...lons)) * 111.2 * Math.max(0.2, Math.cos((mid.lat * Math.PI) / 180));
+    const a = valid[0], b = valid[valid.length - 1];
     const dLat = ((a.lat - b.lat) * Math.PI) / 180;
-    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const dLon = ((b.lon - a.lon) * Math.PI) / 180;
     const hav = Math.sin(dLat / 2) ** 2 + Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-    const km = 2 * 3389.5 * Math.asin(Math.min(1, Math.sqrt(hav)));
-    flyTo(viewer, mid.lat, mid.lon, Math.max(km * 0.72, is2D ? km * 0.9 : 90), 1.6);
+    const chordKm = 2 * 3389.5 * Math.asin(Math.min(1, Math.sqrt(hav)));
+    const km = Math.max(chordKm, Math.hypot(kmLat, kmLon), 0.5);
+    const local = km < 25;
+    flyTo(viewer, mid.lat, ((mid.lon + 540) % 360) - 180, local ? Math.max(km * 1.7, 1.8) : Math.max(km * 0.72, is2D ? km * 0.9 : 90), 1.6);
   }
 
   function applyState(s) {
     if (!s) return;
     cameraMode = s.cameraMode || 'orbit';
-    viewer.scene.screenSpaceCameraController.minimumZoomDistance = cameraMode === 'astronaut' ? 8 : 1200;
+    const tracking = !!s.following && !(s.planetary && (s.remainingKm || 0) > 12);
+    viewer.scene.screenSpaceCameraController.minimumZoomDistance = tracking || cameraMode === 'astronaut' ? 10 : 1200;
     applyYou({ ...(s.astronaut || {}), following: s.following, progress: s.progress, remainingKm: s.remainingKm, planetary: s.planetary, upcoming: s.upcoming, cameraMode });
     if (s.home) {
-      home.position = Cesium.Cartesian3.fromDegrees(s.home.lon, s.home.lat, 12);
+      home.position = cartAt(s.home.lat, s.home.lon, 16);
       home.show = true;
     }
     if (s.destination) {
-      dest.position = Cesium.Cartesian3.fromDegrees(s.destination.lon, s.destination.lat, 12);
+      dest.position = cartAt(s.destination.lat, s.destination.lon, 18);
       dest.label.text = (s.destination.name || 'DEST').slice(0, 18);
       dest.show = true;
     } else dest.show = false;
 
-    lastRoute = s.route || [];
-    const nextKey = routeKey(lastRoute);
+    const routed = (s.route || []).slice();
+    if (routed.length > 1 && s.destination?.lat != null && s.destination?.lon != null) {
+      routed[routed.length - 1] = { ...routed[routed.length - 1], lat: s.destination.lat, lon: s.destination.lon };
+    }
+    lastRoute = routed;
+    const nextKey = routeKey(s);
     const retPts = linePositions(s.returnRoute || []);
     returnPath.polyline.positions = retPts;
     returnPath.polyline.clampToGround = false;
@@ -424,7 +552,7 @@ export function attachAresBridge({ viewer }) {
     if (shouldPaint) {
       extras.forEach((e) => ds.entities.remove(e));
       extras.length = 0;
-      paintRoute(lastRoute);
+      paintRoute(lastRoute, s);
       lastPaintKey = nextKey;
     }
     splitProgress(s.progress || 0);

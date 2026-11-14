@@ -89,40 +89,47 @@ function WalkStick({ value, onChange }) {
   );
 }
 
+const ROUTE_TONE = {
+  safe: { label: 'Safest', color: '#6fd6a3', hint: 'A* with high slope and hazard penalties' },
+  direct: { label: 'Fastest', color: '#5b9cff', hint: 'A* with cheaper terrain costs — still not a straight line' },
+  science: { label: 'Science', color: '#c084fc', hint: 'A* plus geological waypoints, inside safety limits' }
+};
+
 export function RouteComparison() {
   const m = useMission();
   const n = useNavigation();
   const d = useDecision();
   if (!n.comparisons) return null;
-  const rows = [
-    ['safe', 'Safest', 'Low slope, avoid hazards, keep return margin'],
-    ['direct', 'Fastest', 'Shortest time; still penalises severe hazards'],
-    ['science', 'Science', 'Detours through nearby high-value targets']
-  ];
   const scored = Object.fromEntries((d?.comparison?.routes || []).map((r) => [r.type, r]));
   const rec = d?.comparison?.recommended_route;
+  const why = n.routeExplain;
   return (
     <section className="card p-4">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-semibold text-[15px]">Route options</h2>
-        <span className="text-xs text-dust">{rec ? `engine: ${rec}` : 'from your position'}</span>
+        <h2 className="font-semibold text-[15px]">Terrain-aware routes</h2>
+        <span className="text-xs text-dust">{rec ? `engine: ${rec}` : 'A* from your position'}</span>
       </div>
       <div className="flex flex-col gap-2">
-        {rows.map(([id, label, hint]) => {
+        {['safe', 'direct', 'science'].map((id) => {
+          const meta = ROUTE_TONE[id];
           const r = n.comparisons[id];
           const on = m.routeMode === id;
           const s = scored[id.toUpperCase()] || scored[id === 'direct' ? 'DIRECT' : id.toUpperCase()];
           return (
             <button key={id} onClick={() => m.setRouteMode(id)} className={`well p-3 text-left ${on ? '!border-dusk/50' : ''}`}>
               <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-[13px]">{label}{rec === id.toUpperCase() ? ' · recommended' : ''}</span>
+                <span className="font-semibold text-[13px] flex items-center gap-2">
+                  <i className="w-2.5 h-2.5 rounded-full" style={{ background: meta.color }} />
+                  {meta.label}{rec === id.toUpperCase() ? ' · recommended' : ''}
+                </span>
                 <span className="num text-xs text-dust">{r?.metrics?.distanceKm ?? '—'} km · {r?.metrics?.estimatedTimeFormatted || ''}{s ? ` · ${s.safety_score}` : ''}</span>
               </div>
-              <div className="text-xs text-dust mt-1">{hint} · max slope {(r?.metrics?.maxSlope || 0).toFixed(1)}°</div>
+              <div className="text-xs text-dust mt-1">{meta.hint} · max slope {(r?.metrics?.maxSlope || 0).toFixed(1)}° · trav {r?.metrics?.avgTraversability ?? '—'}%</div>
             </button>
           );
         })}
       </div>
+      {why && <p className="text-[12px] text-dust mt-3 leading-relaxed">{why.text}</p>}
     </section>
   );
 }
@@ -233,15 +240,19 @@ export function RouteMap2D() {
     return x;
   };
   const youLon = you?.lon != null ? snapLon(you.lon) : un[0].lon;
-  const lons = un.map((p) => p.lon).concat(youLon);
-  const lats = un.map((p) => p.lat).concat(Number(you?.lat ?? un[0].lat));
-  const pad = 8;
-  const minLon = Math.min(...lons) - pad, maxLon = Math.max(...lons) + pad;
-  const minLat = Math.min(...lats) - pad, maxLat = Math.max(...lats) + pad;
+  const destLon = dest?.lon != null ? snapLon(dest.lon) : un[un.length - 1].lon;
+  const destLat = dest?.lat != null ? Number(dest.lat) : un[un.length - 1].lat;
+  const lons = un.map((p) => p.lon).concat(youLon, destLon);
+  const lats = un.map((p) => p.lat).concat(Number(you?.lat ?? un[0].lat), destLat);
+  const spanLon = Math.max(0.002, Math.max(...lons) - Math.min(...lons));
+  const spanLat = Math.max(0.002, Math.max(...lats) - Math.min(...lats));
+  const padLon = Math.max(spanLon * 0.16, 0.006);
+  const padLat = Math.max(spanLat * 0.16, 0.006);
+  const minLon = Math.min(...lons) - padLon, maxLon = Math.max(...lons) + padLon;
+  const minLat = Math.min(...lats) - padLat, maxLat = Math.max(...lats) + padLat;
   const W = 360, H = 180;
   const X = (lon) => ((lon - minLon) / Math.max(0.01, maxLon - minLon)) * W;
   const Y = (lat) => ((maxLat - lat) / Math.max(0.01, maxLat - minLat)) * H;
-  const destLon = dest?.lon != null ? un[un.length - 1].lon : null;
   const hazards = un.filter((p, i) => p.hazardName && (i === 0 || un[i - 1].hazardName !== p.hazardName) && (p.isHazard || p.band === 'hazard' || p.band === 'caution'));
   const segs = [];
   let run = [un[0]];
@@ -299,12 +310,8 @@ export function RouteMap2D() {
         })}
         <circle cx={X(youLon)} cy={Y(Number(you.lat))} r="4.5" fill="#e4613a" stroke="#fff" strokeWidth="1.5" />
         <text x={X(youLon) + 6} y={Y(Number(you.lat)) - 4} fontSize="8" fill="#f4efe9">YOU</text>
-        {destLon != null && (
-          <>
-            <circle cx={X(destLon)} cy={Y(Number(dest.lat))} r="4" fill="#7fc8cc" stroke="#fff" strokeWidth="1.2" />
-            <text x={X(destLon) + 6} y={Y(Number(dest.lat)) - 4} fontSize="8" fill="#7fc8cc">{dest.name}</text>
-          </>
-        )}
+        <circle cx={X(destLon)} cy={Y(destLat)} r="4" fill="#7fc8cc" stroke="#fff" strokeWidth="1.2" />
+        <text x={X(destLon) + 6} y={Y(destLat) - 4} fontSize="8" fill="#7fc8cc">{dest?.name || 'DEST'}</text>
       </svg>
       <div className="flex items-center gap-3 mt-2 text-[11px] text-dust">
         <span className="flex items-center gap-1"><i className="w-2 h-2 rounded-full bg-[#6fd6a3]" />Safe</span>
