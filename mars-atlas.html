@@ -93,6 +93,20 @@
           <input type="checkbox" id="toggle-labels" checked />
         </label>
 
+        <div class="panel-head"><h2>Lighting</h2></div>
+        <label class="row-toggle">
+          <span>Atmospheric effects</span>
+          <input type="checkbox" id="toggle-atmosphere" checked />
+        </label>
+        <label class="row-toggle">
+          <span>Solar flare</span>
+          <input type="checkbox" id="toggle-flare" checked />
+        </label>
+        <label class="row-toggle">
+          <span>Solar wind</span>
+          <input type="checkbox" id="toggle-solar-wind" />
+        </label>
+
         <div class="panel-head"><h2>Terrain</h2></div>
         <div class="slider-row">
           <label for="exaggeration">Vertical exaggeration</label>
@@ -109,7 +123,8 @@
           <p>
             Imagery: NASA/JPL/USGS Viking MDIM 2.1 and MOLA colourised shaded relief, served
             through NASA's Mars Trek WMTS. Elevation: MOLA/HRSC blended DEM. Names: IAU
-            planetary nomenclature.
+            planetary nomenclature. Atmosphere, solar flare and solar wind are procedural
+            lighting effects for the globe, not scientific solar observations.
           </p>
         </div>
       </section>
@@ -157,6 +172,21 @@
       <button type="button" id="ares-alert-dismiss">Dismiss</button>
     </aside>
 
+    <div class="fx-bar" id="fx-bar" role="group" aria-label="Globe lighting">
+      <label class="row-toggle">
+        <span>Atmosphere</span>
+        <input type="checkbox" id="toggle-atmosphere-hud" checked />
+      </label>
+      <label class="row-toggle">
+        <span>Solar flare</span>
+        <input type="checkbox" id="toggle-flare-hud" checked />
+      </label>
+      <label class="row-toggle">
+        <span>Solar wind</span>
+        <input type="checkbox" id="toggle-solar-wind-hud" />
+      </label>
+    </div>
+
     <div class="measure-panel" id="measure-panel" hidden>
       <div class="mp-head">
         <strong>Distance</strong>
@@ -182,10 +212,12 @@
         <li><strong>Basemaps</strong> — natural-colour Viking mosaic or colourised topography.</li>
         <li><strong>Measure</strong> — click points for geodesic distances.</li>
         <li><strong>Terrain</strong> — real elevation, exaggeration up to 3×.</li>
+        <li><strong>Lighting</strong> — cinematic atmosphere, solar flare and optional solar wind. These are procedural visuals, not observatory data.</li>
       </ul>
       <p class="fine">
         Imagery and elevation © NASA / JPL-Caltech / USGS / ESA. Nomenclature © IAU WGCCRE.
-        Data served live from NASA Mars Trek. Built with CesiumJS.
+        Data served live from NASA Mars Trek. Built with CesiumJS. Solar effects are
+        visualisations aligned to Cesium’s Sun direction, not measured solar imagery.
       </p>
     </dialog>
 

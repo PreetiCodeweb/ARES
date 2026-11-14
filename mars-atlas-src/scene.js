@@ -6,6 +6,7 @@ import NOMENCLATURE from "./data/nomenclature.json";
 import { makeIcon } from "./icons.js";
 import { categorise } from "./mars.js";
 import { addBasemaps, addTerrain, buildGraticule, createViewer, MARS } from "./globe.js";
+import { createSpaceWeather } from "./spaceWeather.js";
 
 const HIGHLIGHT_COLOR = "#e4613a";
 
@@ -13,6 +14,7 @@ export function setupScene(container) {
   const viewer = createViewer(container);
   const basemapLayers = addBasemaps(viewer);
   basemapLayers.get("topo").show = false;
+  const spaceWeather = createSpaceWeather(viewer);
 
   const featureSources = new Cesium.CustomDataSource("features");
   const missionSource = new Cesium.CustomDataSource("missions");
@@ -221,6 +223,7 @@ export function setupScene(container) {
     highlights,
     nomenclature,
     refreshLabels,
+    spaceWeather,
     setLabels(on) {
       state.labelsOn = on;
       refreshLabels();

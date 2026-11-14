@@ -350,6 +350,35 @@ $("#toggle-grid").addEventListener("change", (e) => {
   sceneApi.grid.show = e.target.checked;
 });
 
+function bindPairedToggle(ids, apply, initial) {
+  const els = ids.map((id) => document.getElementById(id)).filter(Boolean);
+  const set = (on) => {
+    apply(on);
+    for (const el of els) el.checked = on;
+  };
+  for (const el of els) {
+    el.checked = initial;
+    el.addEventListener("change", () => set(el.checked));
+  }
+  set(initial);
+}
+
+bindPairedToggle(
+  ["toggle-atmosphere", "toggle-atmosphere-hud"],
+  (on) => sceneApi.spaceWeather.setAtmosphere(on),
+  true
+);
+bindPairedToggle(
+  ["toggle-flare", "toggle-flare-hud"],
+  (on) => sceneApi.spaceWeather.setSolarFlare(on),
+  true
+);
+bindPairedToggle(
+  ["toggle-solar-wind", "toggle-solar-wind-hud"],
+  (on) => sceneApi.spaceWeather.setSolarWind(on),
+  false
+);
+
 $("#toggle-terrain").addEventListener("change", async (e) => {
   if (e.target.checked) {
     const ok = await sceneApi.enableTerrain();

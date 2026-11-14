@@ -98,7 +98,6 @@ export async function addTerrain(viewer) {
     { requestVertexNormals: true, ellipsoid: MARS }
   );
   viewer.scene.terrainProvider = provider;
-  viewer.scene.globe.enableLighting = false;
   return provider;
 }
 
