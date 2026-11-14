@@ -34,6 +34,18 @@ export const MapCard = memo(function MapCard() {
       return { ...p, ...canvasToLatLon(M.mission, p.x, p.y) };
     };
     const planetary = !!N.planetary;
+    const packAlt = (id) => {
+      const r = N.comparisons?.[id];
+      if (!r?.points?.length) return { points: [] };
+      return {
+        points: pointsToGeo(M.mission, r.points),
+        km: Number((r.eva?.remainingM != null ? r.eva.remainingM / 1000 : r.metrics?.distanceKm) || 0),
+        min: r.eva?.remainingMin ?? r.metrics?.estimatedTimeMin ?? 0,
+        o2: r.eva?.oxygenKg,
+        slope: r.metrics?.maxSlope,
+        risk: r.eva?.meanRisk
+      };
+    };
     return {
       cameraMode: N.cameraMode,
       planetary,
@@ -43,9 +55,9 @@ export const MapCard = memo(function MapCard() {
       route: pointsToGeo(M.mission, N.points),
       routeMode: M.routeMode,
       alts: N.comparisons ? {
-        safe: pointsToGeo(M.mission, N.comparisons.safe?.points),
-        direct: pointsToGeo(M.mission, N.comparisons.direct?.points),
-        science: pointsToGeo(M.mission, N.comparisons.science?.points)
+        safe: packAlt('safe'),
+        direct: packAlt('direct'),
+        science: packAlt('science')
       } : null,
       proposed: pointsToGeo(M.mission, N.proposedPoints),
       blocked: pointsToGeo(M.mission, N.blockedPoints),
@@ -103,19 +115,25 @@ export const MapCard = memo(function MapCard() {
     return () => clearTimeout(t);
   }, [n.envelope, n.returnRoute, n.following]);
 
+  const youRaf = useRef(0);
   useEffect(() => {
     if (!ready.current || !n.astronaut) return;
-    const geo = n.astronaut.lat != null ? n.astronaut : { ...n.astronaut, ...canvasToLatLon(m.mission, n.astronaut.x, n.astronaut.y) };
-    postToAtlas(iframe.current?.contentWindow, 'ares:you', {
-      ...geo,
-      following: n.following,
-      progress: n.progress || 0,
-      remainingKm: n.remainingKm || 0,
-      planetary: !!n.planetary,
-      heading: n.astronaut.heading,
-      upcoming: n.upcoming,
-      cameraMode: n.cameraMode
+    if (youRaf.current) cancelAnimationFrame(youRaf.current);
+    youRaf.current = requestAnimationFrame(() => {
+      youRaf.current = 0;
+      const geo = n.astronaut.lat != null ? n.astronaut : { ...n.astronaut, ...canvasToLatLon(m.mission, n.astronaut.x, n.astronaut.y) };
+      postToAtlas(iframe.current?.contentWindow, 'ares:you', {
+        ...geo,
+        following: n.following,
+        progress: n.progress || 0,
+        remainingKm: n.remainingKm || 0,
+        planetary: !!n.planetary,
+        heading: n.astronaut.heading,
+        upcoming: n.upcoming,
+        cameraMode: n.cameraMode
+      });
     });
+    return () => { if (youRaf.current) cancelAnimationFrame(youRaf.current); };
   }, [n.astronaut.x, n.astronaut.y, n.astronaut.lat, n.astronaut.lon, n.astronaut.heading, n.cameraMode, n.following, n.progress, n.upcoming?.meters, m.mission]);
 
   useEffect(() => {
@@ -137,21 +155,21 @@ export const MapCard = memo(function MapCard() {
 
   return (
     <div className="card overflow-hidden flex flex-col h-full">
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-line shrink-0">
+      <div className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b border-line shrink-0">
         <div className="min-w-0">
-          <div className="font-semibold text-[13px]">Surface · {m.mission.name}</div>
-          <div className="text-xs text-dust truncate">Click a red or amber marker for a hazard alert. Same overlay opens in Atlas.</div>
+          <div className="font-semibold text-[13px] truncate">Surface · {m.mission.name}</div>
+          <div className="text-xs text-dust truncate hidden sm:block">Click any point to solve three routes — Safest, Fastest, Science — with distance and EVA time.</div>
         </div>
-        <div className="flex items-center gap-1.5">
-          <button className={`btn !px-2.5 ${flat ? 'btn-ghost' : 'btn-pri'}`} onClick={() => setFlat(false)} title="3D globe">3D</button>
-          <button className={`btn !px-2.5 ${flat ? 'btn-pri' : 'btn-ghost'}`} onClick={() => setFlat(true)} title="2D map">2D</button>
-          <button className="btn btn-ghost !px-2.5" onClick={() => n.setClickIntent(n.clickIntent === 'relocate' ? 'destination' : 'relocate')} title="Map click intent">
-            <Icon n={n.clickIntent === 'relocate' ? 'user' : 'target'} s={14} />{n.clickIntent === 'relocate' ? 'Place crew' : 'Set dest'}
+        <div className="flex items-center gap-1 shrink-0">
+          <button className={`btn !px-2 ${flat ? 'btn-ghost' : 'btn-pri'}`} onClick={() => setFlat(false)} title="3D globe">3D</button>
+          <button className={`btn !px-2 ${flat ? 'btn-pri' : 'btn-ghost'}`} onClick={() => setFlat(true)} title="2D map">2D</button>
+          <button className="btn btn-ghost !px-2" onClick={() => n.setClickIntent(n.clickIntent === 'relocate' ? 'destination' : 'relocate')} title="Map click intent">
+            <Icon n={n.clickIntent === 'relocate' ? 'user' : 'target'} s={14} /><span className="hidden sm:inline">{n.clickIntent === 'relocate' ? 'Place crew' : 'Set dest'}</span>
           </button>
-          <a className="btn btn-ghost" href="/mars-atlas.html" target="_blank" rel="noopener" aria-label="Open the atlas full screen"><Icon n="ext" s={14} /><span className="hidden sm:inline">Atlas</span></a>
+          <a className="btn btn-ghost !px-2" href="/mars-atlas.html" target="_blank" rel="noopener" aria-label="Open the atlas full screen"><Icon n="ext" s={14} /><span className="hidden md:inline">Atlas</span></a>
         </div>
       </div>
-      <div className="relative flex-1 min-h-[320px] sm:min-h-[400px] overflow-hidden bg-[#07060a]">
+      <div className="relative flex-1 min-h-0 overflow-hidden bg-[#07060a]">
         {armed && (
           <iframe ref={iframe} title="Mars Atlas interactive map" src="/mars-atlas.html" className="absolute inset-0 w-full h-full border-0" allow="fullscreen" loading="eager"
             onLoad={() => { ready.current = true; pushState(); postToAtlas(iframe.current?.contentWindow, 'ares:locate'); }} />
@@ -178,7 +196,23 @@ export const MapCard = memo(function MapCard() {
               <p className="text-[11px] text-dust mt-0.5 line-clamp-2">{topAlert.detail}</p>
             </div>
           )}
-          {n.points?.length > 1 && (
+          {n.comparisons ? (
+            <div className="pointer-events-auto well !py-1.5 !px-2 flex flex-col gap-1 shadow-2xl max-w-[min(100%,320px)]">
+              {[['safe', 'Safest', '#6fd6a3'], ['direct', 'Fastest', '#5b9cff'], ['science', 'Science', '#c084fc']].map(([id, label, color]) => {
+                const r = n.comparisons[id];
+                const km = r?.eva?.remainingM != null ? r.eva.remainingM / 1000 : r?.metrics?.distanceKm;
+                const min = Math.round(r?.eva?.remainingMin ?? r?.metrics?.estimatedTimeMin ?? 0);
+                const on = m.routeMode === id;
+                return (
+                  <button key={id} type="button" className={`flex items-center gap-2 text-left text-[11px] rounded-md px-1.5 py-1 ${on ? 'bg-white/10' : ''}`} onClick={() => m.setRouteMode(id)}>
+                    <i className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
+                    <span className="font-semibold text-bone">{label}</span>
+                    <span className="num text-dust ml-auto">{km != null ? `${Number(km).toFixed(2)} km` : '—'} · {min} min</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : n.points?.length > 1 && (
             <div className="pointer-events-auto flex items-center gap-2 text-[11px] text-dust well !py-1.5 !px-2.5">
               <span className="flex items-center gap-1"><i className="w-2 h-2 rounded-full bg-[#6fd6a3]" />Safe</span>
               <span className="flex items-center gap-1"><i className="w-2 h-2 rounded-full bg-[#e8a53d]" />Caution</span>

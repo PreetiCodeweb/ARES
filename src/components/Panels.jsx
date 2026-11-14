@@ -102,7 +102,9 @@ const SPEEDS = [1, 2, 5, 10].map((s) => ({ id: s, label: `${s}×` }));
 export function Tracker() {
   const { metrics, endPlss } = useMission();
   const t = useTelemetry();
-  const done = t.progress * metrics.distanceKm, el = t.progress * metrics.estimatedTimeMin;
+  const n = useNavigation();
+  const done = (n.eva?.distanceTravelled || 0) / 1000;
+  const el = n.elapsedMin || 0;
   const o2 = t.plss.o2RemainingPercent, last = t.alerts[0];
   const lc = { ok: 'text-sol', info: 'text-dusk', warn: 'text-butter', bad: 'text-hazard' }[last.tone];
   return (
@@ -122,12 +124,12 @@ export function Tracker() {
         <span className="row !gap-1.5"><i className="w-3 h-3 rounded-sm bg-hazard/40" />Reported hazard</span>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mt-4">
-        <Stat label="Distance" value={`${done.toFixed(1)} km`} sub={`of ${metrics.distanceKm} km`} />
-        <Stat label="Elapsed" value={hm(el)} sub={`of ${metrics.estimatedTimeFormatted}`} />
-        <Stat label="Slope here" value={`${(t.now?.slope ?? 0).toFixed(1)}°`} sub={`${t.now?.elevation ?? 0} m`} color={(t.now?.slope ?? 0) > 15 ? hex.hazard : undefined} />
-        <div className="well p-3"><div className="label">Oxygen</div><div className="num text-[22px] font-semibold">{o2}%</div><Meter pct={o2} label="Oxygen remaining" color={o2 < 25 ? hex.hazard : hex.dusk} /></div>
+        <Stat label="Distance" value={`${done.toFixed(2)} km`} sub={`of ${((n.eva?.totalDistance || metrics.distanceKm * 1000) / 1000).toFixed(2)} km`} />
+        <Stat label="Elapsed" value={n.eva?.elapsedHMS || hm(el)} sub={`of ${n.eva?.totalHMS || metrics.estimatedTimeFormatted}`} />
+        <Stat label="Slope here" value={`${(n.eva?.terrainSlope ?? t.now?.slope ?? 0).toFixed(1)}°`} sub={`${t.now?.elevation ?? 0} m`} color={(n.eva?.terrainSlope ?? 0) > 15 ? hex.hazard : undefined} />
+        <div className="well p-3"><div className="label">Oxygen</div><div className="num text-[22px] font-semibold">{o2}%</div><div className="text-[11px] text-dust">{(n.eva?.oxygenRemaining ?? 0).toFixed(1)} kg</div><Meter pct={o2} label="Oxygen remaining" color={o2 < 25 ? hex.hazard : hex.dusk} /></div>
         <Stat label="Heart rate" value={`${t.hr} bpm`} sub={t.hr > 130 ? 'Elevated' : 'Steady'} color={t.hr > 130 ? hex.butter : undefined} />
-        <Stat label="Walk-back reserve" value={t.plss.contingencyMet ? 'Met' : 'At risk'} sub={`45 min · ends at ${endPlss.o2RemainingPercent}% O₂`} color={t.plss.contingencyMet ? hex.sol : hex.hazard} />
+        <Stat label="Walk-back reserve" value={t.plss.contingencyMet ? 'Met' : 'At risk'} sub={`${(n.eva?.oxygenNeeded ?? 0).toFixed(1)} kg to dest · end ${endPlss.o2RemainingPercent}%`} color={t.plss.contingencyMet ? hex.sol : hex.hazard} />
       </div>
       <p className={`text-[13px] mt-3 row ${lc}`} role="status"><span className="dot" />{last.text}</p>
     </section>

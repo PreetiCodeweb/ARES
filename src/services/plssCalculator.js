@@ -1,4 +1,6 @@
 // NASA Portable Life Support System (PLSS) Consumable Calculator
+import { forecastPath, snapshotFromTanks } from '../lib/evaSimulation.js';
+import { O2_CAPACITY_KG, packTanks } from '../lib/resourceCalculator.js';
 
 export const PLSS_SPECS = {
   tankCapacityO2Liters: 1200,      // Max usable O2 at 3,000 psi
@@ -11,7 +13,20 @@ export const PLSS_SPECS = {
   contingencyMarginMin: 45         // NASA standard emergency walk-back margin
 };
 
-export function calculatePlssConsumption(routeMetrics, currentProgress = 0) {
+export function calculatePlssConsumption(routeMetrics, currentProgress = 0, points, dustTau = 0.3) {
+  if (points?.length > 1) {
+    const full = forecastPath(points, 0, { fatigue: 0, dustTau });
+    const maxD = points[points.length - 1].d || 1;
+    const at = forecastPath(points, currentProgress * maxD, { fatigue: 0, dustTau });
+    const consumedO2 = Math.max(0, (full.oxygenKg || 0) - (at.oxygenKg || 0));
+    const consumedBatt = Math.max(0, (full.batteryPct || 0) - (at.batteryPct || 0));
+    const tanks = packTanks(
+      Math.max(0, O2_CAPACITY_KG - consumedO2),
+      Math.max(0, 100 - consumedBatt),
+      4.8
+    );
+    return snapshotFromTanks(tanks, { o2Rate: at.avgOxygenRate, battRate: at.avgBatteryRate, forecast: at });
+  }
   const { estimatedTimeMin, avgSlope, distanceKm } = routeMetrics;
 
   if (estimatedTimeMin <= 0) {
@@ -92,7 +107,10 @@ export function fullTanks() {
   return {
     o2RemainingLiters: PLSS_SPECS.tankCapacityO2Liters,
     batteryRemainingWh: PLSS_SPECS.batteryCapacityWh,
-    waterRemainingLiters: PLSS_SPECS.feedwaterCapacityLiters
+    waterRemainingLiters: PLSS_SPECS.feedwaterCapacityLiters,
+    o2Kg: 25.6,
+    batteryPct: 100,
+    waterL: 4.8
   };
 }
 

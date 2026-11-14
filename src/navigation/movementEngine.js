@@ -1,9 +1,10 @@
 import { getElevationAtPoint, getSlopeAtPoint } from '../data/terrainElevationData.js';
 import { METERS_PER_PIXEL } from '../services/coordinates.js';
 import { inMappedZone, inReported, SLOPE_LIMIT } from '../services/pathSolver.js';
+import { BASE_WALK_MPS, effectiveSpeed } from '../lib/terrainEngine.js';
 import { geoBearing, headingBetween, offsetByHeading, turnToward, wrapDeg } from './heading.js';
 
-export const BASE_WALK_MPS = 0.9; // ~3.2 km/h suited EVA walk on flat ground
+export { BASE_WALK_MPS };
 export const TURN_RATE_DPS = 70;
 
 export function clampTactical(x, y) {
@@ -20,20 +21,14 @@ export function sampleTerrain(missionId, x, y, hazards = []) {
 }
 
 /** Terrain-dependent speed multiplier. Flat = 1, steep/hazard slows the crew. */
-export function speedFactor({ slope = 0, zone = false, reported = false, isHazard = false } = {}) {
-  if (reported || isHazard) return 0.35;
-  if (slope > SLOPE_LIMIT) return 0.35;
-  if (zone) return 0.55;
-  if (slope > 10) return 0.7;
-  if (slope > 5) return 0.85;
-  return 1;
+export function speedFactor(sample = {}, fatigue = 0, dustTau = 0.3) {
+  return effectiveSpeed(sample, fatigue, dustTau) / BASE_WALK_MPS;
 }
 
-export function walkStep(astro, { forward = 0, turn = 0, dt = 0.1, missionId, hazards = [] }) {
+export function walkStep(astro, { forward = 0, turn = 0, dt = 0.1, missionId, hazards = [], fatigue = 0, dustTau = 0.3 } = {}) {
   const heading = wrapDeg(astro.heading + turn * TURN_RATE_DPS * dt);
   const here = sampleTerrain(missionId, astro.x, astro.y, hazards);
-  const factor = speedFactor(here);
-  const meters = BASE_WALK_MPS * factor * forward * dt;
+  const meters = effectiveSpeed(here, fatigue, dustTau) * forward * dt;
   const pixels = meters / METERS_PER_PIXEL;
   const stepped = offsetByHeading(astro.x, astro.y, heading, pixels);
   const next = clampTactical(stepped.x, stepped.y);
@@ -77,7 +72,8 @@ export function pointAtDistance(points, distPx) {
   const heading = geoBearing(a, b);
   const lat = a.lat != null && b.lat != null ? a.lat + (b.lat - a.lat) * t : b.lat;
   const lon = a.lon != null && b.lon != null ? a.lon + (b.lon - a.lon) * t : b.lon;
-  return { ...b, x, y, lat, lon, heading, d, idx: lo, t: max ? d / max : 0 };
+  const elevation = a.elevation != null && b.elevation != null ? a.elevation + (b.elevation - a.elevation) * t : b.elevation;
+  return { ...b, x, y, lat, lon, elevation, heading, d, idx: lo, t: max ? d / max : 0 };
 }
 
 export function advanceAlongPath(points, alongPx, meters, missionId, hazards) {

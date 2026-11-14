@@ -35,7 +35,7 @@ function Shell() {
       <Header />
       <div className="flex-1 min-h-0 flex">
         <Nav />
-        <main className="flex-1 min-w-0 overflow-y-auto">
+        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain">
           <div className="max-w-[1500px] mx-auto p-3 sm:p-5 lg:p-6 pb-24 lg:pb-8">
             {/* The explorer stays mounted so the map is never reloaded when you switch views. */}
             <div hidden={view !== 'explorer'}><Explorer /></div>

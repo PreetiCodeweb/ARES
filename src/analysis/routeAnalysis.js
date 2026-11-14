@@ -137,9 +137,11 @@ export function explainTerrainRoute(comparisons, routeMode) {
   const ds = fastest.metrics?.maxSlope || 0;
   const extraM = Math.round(((safest?.metrics?.distanceKm || 0) - (fastest.metrics?.distanceKm || 0)) * 1000);
   const extraMin = Math.round((safest?.metrics?.estimatedTimeMin || 0) - (fastest.metrics?.estimatedTimeMin || 0));
+  const extraO2 = (safest?.eva?.oxygenKg || 0) - (fastest?.eva?.oxygenKg || 0);
   const oldS = safetyFromMetrics(fastest.metrics);
   const newS = safetyFromMetrics(safest?.metrics || cur.metrics);
   const zones = fastest.metrics?.zoneSamples || 0;
-  const text = `The direct path is not recommended because it crosses a ${ds.toFixed(0)}° slope${zones ? ' and a high-risk terrain zone' : ''}. ARES generated an alternative route that ${extraM >= 0 ? 'increases' : 'changes'} travel distance by ${Math.abs(extraM)} m while improving predicted route safety from ${oldS}% to ${newS}%.`;
+  const o2bit = fastest?.eva ? ` Predicted O₂ ${fastest.eva.oxygenKg.toFixed(1)} kg on the fast line vs ${safest?.eva?.oxygenKg.toFixed(1) ?? '—'} kg on the safe line (${extraO2 >= 0 ? '+' : ''}${extraO2.toFixed(1)} kg).` : '';
+  const text = `The direct path is not recommended because it crosses a ${ds.toFixed(0)}° slope${zones ? ' and a high-risk terrain zone' : ''}. ARES generated an alternative route that ${extraM >= 0 ? 'increases' : 'changes'} travel distance by ${Math.abs(extraM)} m while improving predicted route safety from ${oldS}% to ${newS}%.${o2bit}`;
   return { text, extraM, extraMin, oldSafety: oldS, newSafety: newS, maxSlopeDirect: ds, currentSafety: safetyFromMetrics(cur.metrics) };
 }

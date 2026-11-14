@@ -26,7 +26,7 @@ export function GpsHud() {
           </div>
         </div>
         <div className="gps-meters">
-          <span>O₂ <b style={{ color: o2 < 25 ? hex.hazard : hex.dusk }}>{o2}%</b></span>
+          <span>O₂ <b style={{ color: o2 < 25 ? hex.hazard : hex.dusk }}>{o2}% · {(n.eva?.oxygenRemaining ?? 0).toFixed(1)} kg</b></span>
           <span>COMM <b>{n.assessment?.los != null ? `${n.assessment.los}%` : '—'}</b></span>
           <span className="num">{m.routeMode}</span>
         </div>
@@ -39,13 +39,25 @@ export function GpsHud() {
       )}
       {n.rerouteOffer && (
         <div className="gps-alert fail">
-          <div className="gps-alert-title">⚠ HAZARD DETECTED · {n.rerouteOffer.metersAhead} m ahead</div>
-          <p>
-            {n.rerouteOffer.reason}<br />
-            Current safety {n.rerouteOffer.oldSafety}% → alternate {n.rerouteOffer.newSafety}% ·
-            {n.rerouteOffer.extraM >= 0 ? ' +' : ' '}{n.rerouteOffer.extraM} m ·
-            {n.rerouteOffer.extraMin >= 0 ? ' +' : ' '}{n.rerouteOffer.extraMin} min
-          </p>
+          <div className="gps-alert-title">⚠ HAZARD DETECTED {n.rerouteOffer.metersAhead} m AHEAD</div>
+          {n.rerouteOffer.comparison ? (
+            <div className="gps-compare">
+              <p>
+                <b>Current route:</b> {n.rerouteOffer.comparison.current.distanceKm} km · O₂ {n.rerouteOffer.comparison.current.o2Kg} kg · risk {n.rerouteOffer.comparison.current.risk}
+              </p>
+              <p>
+                <b>Suggested reroute:</b> {n.rerouteOffer.comparison.suggested.distanceKm} km · O₂ {n.rerouteOffer.comparison.suggested.o2Kg} kg · risk {n.rerouteOffer.comparison.suggested.risk}
+              </p>
+              <p>WHY: {n.rerouteOffer.reason}</p>
+            </div>
+          ) : (
+            <p>
+              {n.rerouteOffer.reason}<br />
+              Current safety {n.rerouteOffer.oldSafety}% → alternate {n.rerouteOffer.newSafety}% ·
+              {n.rerouteOffer.extraM >= 0 ? ' +' : ' '}{n.rerouteOffer.extraM} m ·
+              {n.rerouteOffer.extraMin >= 0 ? ' +' : ' '}{n.rerouteOffer.extraMin} min
+            </p>
+          )}
           <button type="button" className="btn btn-pri !min-h-9 !text-[12px] mt-2" onClick={n.acceptReroute}>
             <Icon n="route" s={14} />Accept reroute
           </button>

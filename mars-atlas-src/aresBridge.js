@@ -265,12 +265,19 @@ export function attachAresBridge({ viewer }) {
     return Cesium.Cartesian3.fromDegrees(lon, lat, surfaceHeight(lon, lat, extra));
   }
 
-  function linePositions(pts) {
+  let cachedCarts = [];
+  let chevronBucket = -1;
+
+  function linePositions(pts, extra) {
     if (!pts?.length) return [];
-    const extra = followOn ? 14 : 22;
+    const off = extra ?? (followOn ? 14 : 22);
     return pts
       .filter((p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lon))
-      .map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, surfaceHeight(p.lon, p.lat, extra)));
+      .map((p) => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, surfaceHeight(p.lon, p.lat, off)));
+  }
+
+  function cacheRouteCarts(pts) {
+    cachedCarts = linePositions(pts, followOn ? 14 : 22);
   }
 
   function offset(lat, lon, heading, meters) {
@@ -280,12 +287,22 @@ export function attachAresBridge({ viewer }) {
     return { lat: lat + dLat, lon: lon + dLon };
   }
 
+  function altPoints(alt) {
+    if (!alt) return [];
+    return Array.isArray(alt) ? alt : (alt.points || []);
+  }
+
   function routeKey(s) {
     const pts = s?.route || s || [];
     if (!pts.length && !s?.routeMode) return '';
+    const altSig = (id) => {
+      const a = s?.alts?.[id];
+      const p = altPoints(a);
+      return `${p.length}:${a?.km ?? ''}:${a?.min ?? ''}`;
+    };
     if (s?.route) {
       const a = s.route[0], b = s.route[s.route.length - 1];
-      return `${s.routeMode}:${s.route.length}:${a?.lat}:${b?.lat}:${s.alts?.safe?.length || 0}:${s.proposed?.length || 0}:${s.blocked?.length || 0}`;
+      return `${s.routeMode}:${s.route.length}:${a?.lat}:${b?.lat}:${altSig('safe')}:${altSig('direct')}:${altSig('science')}:${s.proposed?.length || 0}:${s.blocked?.length || 0}`;
     }
     const a = pts[0], b = pts[pts.length - 1];
     return `${pts.length}:${a?.lat}:${a?.lon}:${b?.lat}:${b?.lon}`;
@@ -316,13 +333,18 @@ export function attachAresBridge({ viewer }) {
       traveled.polyline.positions = [];
       remaining.polyline.positions = [];
       paintChevrons([]);
+      chevronBucket = -1;
       return;
     }
-    const cut = Math.max(1, Math.min(lastRoute.length - 1, Math.round((progress || 0) * (lastRoute.length - 1))));
-    traveled.polyline.positions = linePositions(lastRoute.slice(0, cut + 1));
-    const rest = lastRoute.slice(Math.max(0, cut - 1));
-    remaining.polyline.positions = linePositions(rest);
-    paintChevrons(rest);
+    if (cachedCarts.length !== lastRoute.length) cacheRouteCarts(lastRoute);
+    const cut = Math.max(1, Math.min(cachedCarts.length - 1, Math.round((progress || 0) * (cachedCarts.length - 1))));
+    traveled.polyline.positions = cachedCarts.slice(0, cut + 1);
+    remaining.polyline.positions = cachedCarts.slice(Math.max(0, cut - 1));
+    const bucket = Math.floor((progress || 0) * 10);
+    if (bucket !== chevronBucket) {
+      chevronBucket = bucket;
+      paintChevrons(lastRoute.slice(Math.max(0, cut - 1)));
+    }
   }
 
   function setFollow(on) {
@@ -333,11 +355,13 @@ export function attachAresBridge({ viewer }) {
       viewer.scene.screenSpaceCameraController.enableRotate = false;
       viewer.scene.screenSpaceCameraController.enableTranslate = false;
       viewer.scene.screenSpaceCameraController.enableZoom = false;
+      viewer.scene.screenSpaceCameraController.minimumZoomDistance = 10;
       if (lastYou) {
         smooth.lat = lastYou.lat;
         smooth.lon = lastYou.lon;
         smooth.heading = lastYou.heading || 0;
       }
+      if (lastRoute.length) cacheRouteCarts(lastRoute);
     } else {
       viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
       viewer.scene.screenSpaceCameraController.enableRotate = true;
@@ -429,6 +453,46 @@ export function attachAresBridge({ viewer }) {
   }
 
   const MODE_COL = { safe: '#6fd6a3', direct: '#5b9cff', science: '#c084fc' };
+  const MODE_NAME = { safe: 'Safest', direct: 'Fastest', science: 'Science' };
+
+  function addRouteLabel(pts, text, color) {
+    const mid = pts[Math.max(1, Math.floor(pts.length * 0.42))];
+    if (!mid || mid.lat == null || mid.lon == null) return;
+    routeDs.entities.add({
+      position: cartAt(mid.lat, mid.lon, 48),
+      point: {
+        pixelSize: 9,
+        color: Cesium.Color.fromCssColorString(color),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 1.5,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      },
+      label: {
+        text,
+        font: 'bold 12px sans-serif',
+        fillColor: Cesium.Color.fromCssColorString('#f4efe9'),
+        outlineColor: Cesium.Color.fromCssColorString('#120e16'),
+        outlineWidth: 4,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('#15121ad9'),
+        backgroundPadding: new Cesium.Cartesian2(8, 5),
+        pixelOffset: new Cesium.Cartesian2(0, -18),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        scaleByDistance: new Cesium.NearFarScalar(1.5e3, 1.05, 9e6, 0.5)
+      }
+    });
+  }
+
+  function formatAltLabel(id, alt) {
+    const km = Number(alt.km);
+    const mins = Math.max(0, Math.round(Number(alt.min) || 0));
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    const time = h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m} min`;
+    const kmTxt = Number.isFinite(km) ? `${km.toFixed(2)} km` : '—';
+    return `${MODE_NAME[id] || id}\n${kmTxt} · ${time}`;
+  }
 
   function paintRoute(pts, s = {}) {
     routeDs.entities.removeAll();
@@ -438,8 +502,12 @@ export function attachAresBridge({ viewer }) {
     const planetary = !!s.planetary;
     if (s.alts) {
       ['safe', 'direct', 'science'].forEach((id) => {
-        if (id === s.routeMode) return;
-        addLine(s.alts[id], MODE_COL[id], 3.4, false, null, planetary);
+        const alt = s.alts[id];
+        const ap = altPoints(alt);
+        if (ap.length < 2) return;
+        const selected = id === s.routeMode;
+        addLine(ap, MODE_COL[id], selected ? 5.5 : 4.4, false, null, planetary);
+        if (alt && !Array.isArray(alt) && alt.km != null) addRouteLabel(ap, formatAltLabel(id, alt), MODE_COL[id]);
       });
     }
     addLine(pts, '#1a0c0a', 16, false, null, planetary);
@@ -537,8 +605,9 @@ export function attachAresBridge({ viewer }) {
       routed[routed.length - 1] = { ...routed[routed.length - 1], lat: s.destination.lat, lon: s.destination.lon };
     }
     lastRoute = routed;
+    if (routed.length) cacheRouteCarts(routed);
     const nextKey = routeKey(s);
-    const retPts = linePositions(s.returnRoute || []);
+    const retPts = s.following ? [] : linePositions(s.returnRoute || []);
     returnPath.polyline.positions = retPts;
     returnPath.polyline.clampToGround = false;
     returnPath.show = retPts.length > 1 && !s.following;

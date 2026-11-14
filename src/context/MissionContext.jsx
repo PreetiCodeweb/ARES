@@ -36,12 +36,12 @@ export function MissionProvider({ children }) {
 
   const path = useMemo(() => generateDensePath(waypoints, missionId, routeMode, routing), [waypoints, missionId, routeMode, routing]);
   const metrics = useMemo(() => calculateRouteMetrics(path.points), [path]);
-  const endPlss = useMemo(() => calculatePlssConsumption(metrics, 1), [metrics]);
+  const endPlss = useMemo(() => calculatePlssConsumption(metrics, 1, path.points, mission.dustTau), [metrics, path.points, mission.dustTau]);
   const assessment = useMemo(() => assessRoute({ metrics, points: path.points, hazards, mission, endPlss, pois }), [metrics, path, hazards, mission, endPlss, pois]);
   const stations = useMemo(() => path.stations.map((s, i) => {
     const p = path.points[s.index];
-    return { ...s.wp, n: i, t: p.t, km: (metrics.distanceKm * p.t), etaMin: Math.round(metrics.estimatedTimeMin * p.t), slope: p.slope, elevation: p.elevation, o2: calculatePlssConsumption(metrics, p.t).o2RemainingPercent };
-  }), [path, metrics]);
+    return { ...s.wp, n: i, t: p.t, km: (metrics.distanceKm * p.t), etaMin: Math.round(metrics.estimatedTimeMin * p.t), slope: p.slope, elevation: p.elevation, o2: calculatePlssConsumption(metrics, p.t, path.points, mission.dustTau).o2RemainingPercent };
+  }), [path, metrics, mission.dustTau]);
 
   const latest = useRef({});
   latest.current = { path, metrics, waypoints, routeMode, routing, missionId };

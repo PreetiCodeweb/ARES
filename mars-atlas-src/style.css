@@ -637,6 +637,6 @@ html.ares-embedded .dock.open {
   pointer-events: auto;
 }
 html.ares-embedded .info-card { display: none !important; }
-html.ares-embedded .hud-bottom { left: 12px; right: 12px; bottom: 12px; }
+html.ares-embedded .hud-bottom { display: none !important; }
 html.ares-embedded #boot { display: none; }
-html.ares-embedded .dock-btn { display: inline-flex; }
+html.ares-embedded .dock-btn { display: none !important; }

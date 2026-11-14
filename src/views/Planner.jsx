@@ -57,8 +57,8 @@ export default function Planner() {
           <section className="card p-5">
             <div className="flex items-center justify-between"><h2 className="font-semibold text-[15px]">Suit reserves</h2><span className={`tag ${plss.contingencyMet ? 'tag-go' : 'tag-hold'}`}>{plss.contingencyMet ? 'Margin met' : 'Margin low'}</span></div>
             <div className="flex flex-col gap-2.5 mt-3">
-              <Reserve icon="wind" label="Oxygen" pct={plss.o2RemainingPercent} color={hex.dusk} sub={`${plss.o2RemainingLiters} L · ${plss.o2EnduranceFormatted} at ${plss.o2BurnRateLMin} L/min`} />
-              <Reserve icon="bolt" label="Power" pct={plss.batteryRemainingPercent} color={hex.sol} sub={`${plss.batteryRemainingWh} Wh`} />
+              <Reserve icon="wind" label="Oxygen" pct={plss.o2RemainingPercent} color={hex.dusk} sub={`${(plss.o2Kg ?? (plss.o2RemainingLiters * 25.6 / 1200)).toFixed(1)} kg · ${plss.o2EnduranceFormatted} at ${(plss.o2BurnRateKgH || 0.84).toFixed(2)} kg/h`} />
+              <Reserve icon="bolt" label="Power" pct={plss.batteryRemainingPercent} color={hex.sol} sub={`${plss.batteryRemainingPercent}% · ${(plss.batteryDrainPctH || 8).toFixed(1)} %/h`} />
               <Reserve icon="drop" label="Cooling water" pct={plss.coolingWaterPercent} color="#8fb4ff" sub="Sublimator loop" />
             </div>
             <p className="text-xs text-dust mt-3">Consumables follow actual movement and terrain effort. Walk-back is a routed path, not this radius number.</p>

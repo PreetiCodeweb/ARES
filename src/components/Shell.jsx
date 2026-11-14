@@ -24,7 +24,7 @@ const Logo = () => (
 const Clock = memo(function Clock({ lon }) {
   const t = useLmst(lon);
   return (
-    <div className="hidden md:flex items-center gap-2 text-[13px]" title="Local mean solar time at the site, computed from the real Mars clock">
+    <div className="hidden xl:flex items-center gap-2 text-[13px]" title="Local mean solar time at the site, computed from the real Mars clock">
       <Icon n="sun" s={15} className={t.day ? 'text-butter' : 'text-dusk'} />
       <span className="num font-semibold">{p2(t.h)}:{p2(t.m)}</span>
       <span className="text-dust hidden xl:inline">LMST · {t.day ? 'daylight' : 'night'}</span>
@@ -39,10 +39,10 @@ export function Header() {
   const { role, setRole, setPalette } = useUi();
   const online = useOnline();
   return (
-    <header className="h-14 shrink-0 flex items-center gap-2 sm:gap-4 px-3 sm:px-5 border-b border-line bg-basalt relative z-30">
-      <div className="flex items-center gap-2.5"><Logo /><span className="display text-[22px] font-semibold">ARES</span></div>
+    <header className="h-14 shrink-0 flex items-center gap-1.5 sm:gap-3 px-2.5 sm:px-5 border-b border-line bg-basalt relative z-30 min-w-0 overflow-hidden">
+      <div className="flex items-center gap-2 shrink-0"><Logo /><span className="display text-[20px] sm:text-[22px] font-semibold">ARES</span></div>
       <Menu trigger={({ toggle, open }) => (
-        <button className="btn btn-ghost !px-2.5 min-w-0" onClick={toggle} aria-haspopup="menu" aria-expanded={open}>
+        <button className="btn btn-ghost !px-2 min-w-0 max-w-[46vw] sm:max-w-none" onClick={toggle} aria-haspopup="menu" aria-expanded={open}>
           <span className="truncate">{mission.name}</span><span className="text-dust font-normal hidden sm:inline">Sol {mission.activeSol}</span><Icon n="chev" s={14} />
         </button>
       )}>
@@ -50,15 +50,15 @@ export function Header() {
       </Menu>
       <div className="flex-1" />
       <Clock lon={mission.coordinates.lon} />
-      <span className={`tag hidden md:inline-flex ${ret === 'ponr' ? 'tag-hold' : ret === 'low' ? 'tag-caution' : 'tag-go'}`} title="Safe return uses the routing engine, not a circular radius">
+      <span className={`tag hidden xl:inline-flex ${ret === 'ponr' ? 'tag-hold' : ret === 'low' ? 'tag-caution' : 'tag-go'}`} title="Safe return uses the routing engine, not a circular radius">
         {ret === 'ponr' ? 'Point of no return' : ret === 'low' ? 'Return margin low' : 'Return nominal'}
       </span>
       {online
-        ? <span className="tag tag-go" title="Simulated one-way signal delay to Earth"><Icon n="signal" s={13} /><span className="hidden sm:inline">Link up · 14.2 min delay</span><span className="sm:hidden">Link</span></span>
-        : <span className="tag tag-caution" title="Plans and EVA briefs keep working offline"><Icon n="off" s={13} />Offline · plan cached</span>}
-      <div className="hidden lg:block"><Seg label="Console" value={role} onChange={setRole} options={ROLES.map((r) => ({ id: r.id, label: r.label, hint: r.hint }))} /></div>
-      <button className="btn btn-ghost !px-2.5" onClick={() => setPalette(true)} aria-label="Open command palette">
-        <Icon n="cmd" s={15} /><span className="hidden sm:inline">Search</span><span className="kbd hidden md:inline">Ctrl K</span>
+        ? <span className="tag tag-go shrink-0" title="Simulated one-way signal delay to Earth"><Icon n="signal" s={13} /><span className="hidden xl:inline">Link up · 14.2 min delay</span><span className="xl:hidden">Link</span></span>
+        : <span className="tag tag-caution shrink-0" title="Plans and EVA briefs keep working offline"><Icon n="off" s={13} />Offline</span>}
+      <div className="hidden xl:block"><Seg label="Console" value={role} onChange={setRole} options={ROLES.map((r) => ({ id: r.id, label: r.label, hint: r.hint }))} /></div>
+      <button className="btn btn-ghost !px-2 shrink-0" onClick={() => setPalette(true)} aria-label="Open command palette">
+        <Icon n="cmd" s={15} /><span className="hidden md:inline">Search</span>
       </button>
     </header>
   );

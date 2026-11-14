@@ -40,7 +40,11 @@ export function assessRoute({ metrics, points, hazards, mission, endPlss, pois }
   add('comms', los < 40 ? 'fail' : los < 85 ? 'warn' : 'pass', 'Habitat link', `${los}% of the route in line of sight of the relay mast`);
 
   const o2 = endPlss.o2RemainingPercent;
-  add('o2', endPlss.isPointOfNoReturnExceeded || o2 < 10 ? 'fail' : o2 < 25 ? 'warn' : 'pass', 'Oxygen reserve', `${o2}% left at return, 45-minute walk-back margin ${endPlss.isPointOfNoReturnExceeded ? 'not met' : 'met'}`);
+  const o2kg = endPlss.o2Kg != null ? `${endPlss.o2Kg.toFixed(1)} kg remaining` : `${o2}% left at return`;
+  const o2Level = endPlss.oxygenStatus?.code === 'RED' || endPlss.isPointOfNoReturnExceeded || o2 < 10
+    ? 'fail'
+    : endPlss.oxygenStatus?.code === 'YELLOW' || o2 < 25 ? 'warn' : 'pass';
+  add('o2', o2Level, 'Oxygen reserve', `${o2kg}. 20% destination reserve ${endPlss.contingencyMet ? 'met' : 'not met'}`);
 
   add('time', m.estimatedTimeMin > 480 ? 'fail' : m.estimatedTimeMin > 360 ? 'warn' : 'pass', 'EVA duration', `${m.estimatedTimeFormatted} against an 8h suit limit`);
 

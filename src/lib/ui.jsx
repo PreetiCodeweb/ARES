@@ -29,10 +29,10 @@ export const Stat = ({ label, value, sub, color }) => (
 export const PageHead = ({ title, sub, children }) => (
   <div className="flex flex-wrap items-end justify-between gap-3">
     <div className="min-w-0">
-      <h1 className="display text-[28px] sm:text-[34px] font-medium">{title}</h1>
-      {sub && <p className="text-dust mt-1.5 max-w-[68ch]">{sub}</p>}
+      <h1 className="display text-[22px] sm:text-[28px] md:text-[34px] font-medium leading-tight">{title}</h1>
+      {sub && <p className="text-dust mt-1.5 max-w-[68ch] text-[13px] sm:text-[14px]">{sub}</p>}
     </div>
-    {children && <div className="flex items-center gap-2 flex-wrap">{children}</div>}
+    {children && <div className="flex items-center gap-2 flex-wrap min-w-0">{children}</div>}
   </div>
 );
 

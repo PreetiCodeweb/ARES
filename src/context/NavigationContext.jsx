@@ -2,12 +2,18 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useMission } from './MissionContext.jsx';
 import { canvasToMarsCoords, marsToCanvasCoords } from '../services/coordinates.js';
 import { assessRoute } from '../services/assess.js';
-import { fullTanks, tickPlss } from '../services/plssCalculator.js';
+import { fullTanks } from '../services/plssCalculator.js';
 import { toast } from '../lib/toast.js';
+import { composeEva, forecastPath } from '../lib/evaSimulation.js';
+import { compareReroute } from '../lib/hazardEngine.js';
+import { consumeStep } from '../lib/resourceCalculator.js';
+import { formatClockMin } from '../lib/routeEngine.js';
+import { rankRoutes } from '../lib/routeScoring.js';
+import { effectiveSpeed } from '../lib/terrainEngine.js';
 import { geoBearing, headingLabel } from '../navigation/heading.js';
-import { advanceAlongPath, BASE_WALK_MPS, nearestIndex, pointAtDistance, sampleTerrain, snapToPath, speedFactor, walkStep } from '../navigation/movementEngine.js';
+import { advanceAlongPath, nearestIndex, pointAtDistance, sampleTerrain, snapToPath, walkStep } from '../navigation/movementEngine.js';
 import { alternateAdvice, explainTerrainRoute, nextInstruction, safetyFromMetrics, terrainAhead, upcomingHazard } from '../analysis/routeAnalysis.js';
-import { compareNavRoutes, evaluateSafeReturn, generateReturnRoute, reachableEnvelope } from '../routing/returnRoute.js';
+import { compareNavRoutes, generateReturnRoute, reachableEnvelope } from '../routing/returnRoute.js';
 import { generatePlanetRoute } from '../routing/planetRoute.js';
 import { destGeoOf, fallbackGeoTrack, finalizeRoute, inTacticalCanvas, stampPathGeo } from '../routing/geoPath.js';
 function fmtGeo(lat, lon) {
@@ -46,6 +52,7 @@ export function NavigationProvider({ children }) {
   const [locatePulse, setLocatePulse] = useState(0);
   const [stick, setStick] = useState({ forward: 0, turn: 0 });
   const [tanks, setTanks] = useState(() => fullTanks());
+  const [fatigue, setFatigue] = useState(0);
   const [envelope, setEnvelope] = useState([]);
   const [routeFitPulse, setRouteFitPulse] = useState(0);
   const [rerouteOffer, setRerouteOffer] = useState(null);
@@ -70,6 +77,7 @@ export function NavigationProvider({ children }) {
     setTraveledM(0);
     setElapsedMin(0);
     setTanks(fullTanks());
+    setFatigue(0);
     setEnvelope([]);
     setControlMode('observe');
     setCameraMode('orbit');
@@ -110,9 +118,10 @@ export function NavigationProvider({ children }) {
       if ((tagged[id]?.points?.length || 0) < 2 && extra.lat != null) {
         tagged[id] = { ...(tagged[id] || {}), points: fallbackGeoTrack(from, destGeo), planetary: !onGrid };
       }
+      tagged[id].eva = forecastPath(tagged[id].points || [], 0, { fatigue: 0, dustTau: mission.dustTau });
     }
     return tagged;
-  }, [destination, routeOrigin, missionId, routing, originGeo, mission, astronaut.x, astronaut.y, astronaut.lat, astronaut.lon, astronaut.elevation]);
+  }, [destination, routeOrigin, missionId, routing, originGeo, mission]);
 
   const liveRouted = destination && comparisons ? comparisons[routeMode] : null;
   const livePoints = useMemo(() => {
@@ -168,14 +177,47 @@ export function NavigationProvider({ children }) {
   );
   const routeExplain = useMemo(() => explainTerrainRoute(comparisons, routeMode), [comparisons, routeMode]);
 
-  const tanksSnap = useMemo(() => {
-    const slope = geoAstro.slope || 0;
-    return tickPlss(tanks, { dtMin: 0, slope, zone: geoAstro.zone, moving: following || Math.abs(keys.current.f) > 0 });
-  }, [tanks, geoAstro.slope, geoAstro.zone, following]);
+  const hereSample = useMemo(() => ({
+    slope: geoAstro.slope || 0,
+    zone: !!geoAstro.zone,
+    reported: !!geoAstro.reported,
+    isHazard: !!geoAstro.isHazard,
+    dh: 0,
+    dist: 1,
+    elevation: geoAstro.elevation || 0
+  }), [geoAstro.slope, geoAstro.zone, geoAstro.reported, geoAstro.isHazard, geoAstro.elevation]);
+
+  const forecast = useMemo(
+    () => forecastPath(activePoints, alongPx, { fatigue, dustTau: mission.dustTau }),
+    [activePoints, alongPx, fatigue, mission.dustTau]
+  );
+
+  const eva = useMemo(() => composeEva({
+    tanks,
+    fatigue,
+    forecast,
+    elapsedMin,
+    traveledM,
+    sample: hereSample,
+    following,
+    moving: following || controlMode === 'walk',
+    speedMps: geoAstro.speedMps || 0,
+    dustTau: mission.dustTau,
+    followSpeed
+  }), [tanks, fatigue, forecast, elapsedMin, traveledM, hereSample, following, controlMode, geoAstro.speedMps, mission.dustTau, followSpeed]);
+
+  const tanksSnap = eva.plss;
+  const routeRank = useMemo(() => (comparisons ? rankRoutes(comparisons) : null), [comparisons]);
+  const evaMetrics = useMemo(() => ({
+    ...activeMetrics,
+    estimatedTimeMin: Math.round((elapsedMin || 0) + (forecast.remainingMin || 0)),
+    estimatedTimeFormatted: formatClockMin((elapsedMin || 0) + (forecast.remainingMin || 0))
+  }), [activeMetrics, elapsedMin, forecast.remainingMin]);
 
   const returnSnap = useRef({ from: null, path: { points: [], metrics: activeMetrics } });
   const returnRoute = useMemo(() => {
     if (routed?.planetary) return returnSnap.current.path || { points: [], metrics: activeMetrics };
+    if (following && returnSnap.current.path?.points?.length) return returnSnap.current.path;
     const bin = following ? 40 : 8;
     const key = `${missionId}:${Math.round(geoAstro.x / bin)}:${Math.round(geoAstro.y / bin)}:${routing?.length || 0}`;
     if (returnSnap.current.from === key) return returnSnap.current.path;
@@ -184,7 +226,31 @@ export function NavigationProvider({ children }) {
     return pathR;
   }, [geoAstro.x, geoAstro.y, home, missionId, routing, following, routed?.planetary, activeMetrics]);
 
-  const safeReturn = useMemo(() => evaluateSafeReturn(tanksSnap, returnRoute.metrics), [tanksSnap, returnRoute]);
+  const returnForecast = useMemo(
+    () => forecastPath(returnRoute.points || [], 0, { fatigue, dustTau: mission.dustTau }),
+    [returnRoute.points, fatigue, mission.dustTau]
+  );
+  const safeReturn = useMemo(() => {
+    const o2Kg = tanksSnap.o2Kg ?? 25.6;
+    const need = returnForecast.oxygenKg || 0;
+    const rate = tanksSnap.o2BurnRateKgH || 0.84;
+    const remainingMin = rate > 0 ? (o2Kg / rate) * 60 : 0;
+    const returnMin = returnForecast.remainingMin || returnRoute.metrics?.estimatedTimeMin || 0;
+    const marginMin = remainingMin - returnMin;
+    let status = 'nominal';
+    if (o2Kg <= need) status = 'ponr';
+    else if (o2Kg < need * 1.2) status = 'low';
+    const budgetMeters = Math.max(0, (remainingMin - 45) / 60) * (eva.walkingSpeed || 0.8) * 3600 * 0.45;
+    return {
+      status,
+      marginMin: Math.round(marginMin),
+      needLiters: Math.round((need / 25.6) * 1200),
+      needKg: Number(need.toFixed(2)),
+      returnKm: Number((((returnForecast.remainingM || (returnRoute.metrics?.distanceKm || 0) * 1000)) / 1000).toFixed(2)),
+      returnMin: Math.round(returnMin),
+      budgetMeters
+    };
+  }, [tanksSnap, returnForecast, returnRoute.metrics, eva.walkingSpeed]);
   const plss = useMemo(() => ({
     ...tanksSnap,
     isPointOfNoReturnExceeded: safeReturn.status === 'ponr',
@@ -200,8 +266,6 @@ export function NavigationProvider({ children }) {
     const nHz = routing?.length || 0;
     if (nHz > hzSeen.current && pathHold.current?.points?.length > 2) {
       const prev = pathHold.current;
-      const extraM = Math.round(((liveMetrics.distanceKm || 0) - (prev.metrics?.distanceKm || 0)) * 1000);
-      const extraMin = Math.round((liveMetrics.estimatedTimeMin || 0) - (prev.metrics?.estimatedTimeMin || 0));
       const h = routing[routing.length - 1];
       let metersAhead = 320;
       if (h && prev.points?.length) {
@@ -209,20 +273,25 @@ export function NavigationProvider({ children }) {
         for (const p of prev.points) {
           if (Math.hypot(p.x - h.x, p.y - h.y) < Math.hypot(best.x - h.x, best.y - h.y)) best = p;
         }
-        metersAhead = Math.max(40, Math.round(((best.d || 0) - (prev.points[0].d || 0)) * 5.875));
+        metersAhead = Math.max(40, Math.round(((best.d || 0) - (live.current.alongPx || prev.points[0].d || 0)) * 5.875));
       }
       const blocked = (prev.points || []).filter((p) => h && Math.hypot(p.x - h.x, p.y - h.y) < (h.r || 40) + 18);
+      const comparison = compareReroute(prev.points, livePoints, live.current.alongPx || 0, {
+        fatigue: live.current.fatigue || 0,
+        dustTau: live.current.dustTau || mission.dustTau
+      });
       setRerouteOffer({
         previous: prev,
         proposed: { points: livePoints, metrics: liveMetrics },
-        extraM,
-        extraMin,
+        extraM: comparison.extraM,
+        extraMin: comparison.extraMin,
         oldSafety: safetyFromMetrics(prev.metrics),
         newSafety: safetyFromMetrics(liveMetrics),
         metersAhead,
         hazardKind: h?.kind || 'hazard',
         blocked,
-        reason: 'High slope / dust risk on the current line. ARES found a traversable corridor around it.'
+        reason: comparison.why,
+        comparison
       });
       toast('Hazard on route. Review the alternate path.', 'warn');
       hzSeen.current = nHz;
@@ -233,10 +302,9 @@ export function NavigationProvider({ children }) {
   }, [routing?.length, livePoints, liveMetrics, rerouteOffer]);
 
   useEffect(() => {
-    if (routed?.planetary) { setEnvelope([]); return; }
+    if (routed?.planetary || following) { if (routed?.planetary) setEnvelope([]); return; }
     const budget = safeReturn.budgetMeters;
-    const bin = following ? 48 : 16;
-    const key = `${Math.round(geoAstro.x / bin)}:${Math.round(geoAstro.y / bin)}:${Math.round(budget / 80)}:${routing?.length || 0}`;
+    const key = `${Math.round(geoAstro.x / 16)}:${Math.round(geoAstro.y / 16)}:${Math.round(budget / 80)}:${routing?.length || 0}`;
     if (lastReturnAt.current === key) return;
     lastReturnAt.current = key;
     setEnvelope(reachableEnvelope(missionId, geoAstro, budget, routing));
@@ -244,7 +312,8 @@ export function NavigationProvider({ children }) {
 
   live.current = {
     mission, missionId, routing, astronaut, following, followSpeed, controlMode, stick,
-    activePoints, alongPx, planetary: !!routed?.planetary
+    activePoints, alongPx, planetary: !!routed?.planetary,
+    fatigue, dustTau: mission.dustTau, idx, tanks
   };
 
   const applyPose = useCallback((next, movedM = 0) => {
@@ -255,8 +324,20 @@ export function NavigationProvider({ children }) {
     if (movedM > 0) setTraveledM((d) => d + movedM);
   }, [mission]);
 
-  const burn = useCallback((dtMin, moving, slope, zone) => {
-    setTanks((t) => tickPlss(t, { dtMin, slope, zone, moving }).tanks);
+  const burn = useCallback((dtMin, moving, sample = {}, distM = 0) => {
+    const next = consumeStep({
+      tanks: live.current.tanks,
+      fatigue: live.current.fatigue || 0,
+      dtHour: dtMin / 60,
+      distM,
+      sample,
+      moving,
+      dustTau: live.current.dustTau ?? 0.3
+    });
+    live.current.tanks = next.tanks;
+    live.current.fatigue = next.fatigue;
+    setTanks(next.tanks);
+    setFatigue(next.fatigue);
     setElapsedMin((e) => e + dtMin);
   }, []);
 
@@ -291,13 +372,15 @@ export function NavigationProvider({ children }) {
       if (!L.astronaut) return;
 
       if (L.following && L.activePoints.length > 1) {
-        const factor = speedFactor(sampleTerrain(L.missionId, L.astronaut.x, L.astronaut.y, L.routing));
-        const meters = BASE_WALK_MPS * factor * Math.max(1, L.followSpeed) * dt;
+        const sample = sampleTerrain(L.missionId, L.astronaut.x, L.astronaut.y, L.routing);
+        const trueSpeed = effectiveSpeed(sample, L.fatigue || 0, L.dustTau);
+        const meters = trueSpeed * Math.max(1, L.followSpeed) * dt;
         const stepped = advanceAlongPath(L.activePoints, L.alongPx, meters, L.missionId, L.routing);
         if (stepped) {
-          applyPose(stepped.pose, meters);
+          const dh = (stepped.pose.elevation ?? 0) - (L.astronaut.elevation ?? 0);
+          applyPose({ ...stepped.pose, speedMps: trueSpeed }, meters);
           setAlongPx(stepped.alongPx);
-          burn((dt / 60) * L.followSpeed, true, stepped.pose.slope, stepped.pose.zone);
+          burn((dt / 60) * L.followSpeed, true, { ...stepped.pose, dh, dist: meters }, meters);
           if (stepped.progress >= 0.999) {
             setFollowing(false);
             toast('Arrived. Check safe return before the next leg.', 'ok');
@@ -309,15 +392,18 @@ export function NavigationProvider({ children }) {
       const forward = L.stick.forward || keys.current.f;
       const turn = L.stick.turn || keys.current.t;
       if (L.controlMode === 'walk' && (forward || turn)) {
-        const next = walkStep(L.astronaut, { forward, turn, dt, missionId: L.missionId, hazards: L.routing });
+        const next = walkStep(L.astronaut, {
+          forward, turn, dt, missionId: L.missionId, hazards: L.routing,
+          fatigue: L.fatigue || 0, dustTau: L.dustTau
+        });
         applyPose(next, next.movedM);
         setAlongPx(snapToPath(L.activePoints, next.x, next.y).alongPx);
-        burn(dt / 60, next.movedM > 0.01, next.slope, next.zone);
+        burn(dt / 60, next.movedM > 0.01, { ...next, dist: next.movedM }, next.movedM);
         return;
       }
 
-      burn((dt / 60) * 0.35, false, L.astronaut.slope, L.astronaut.zone);
-    }, 50);
+      burn(dt / 60, false, L.astronaut, 0);
+    }, 80);
     return () => clearInterval(id);
   }, [applyPose, burn]);
 
@@ -481,6 +567,7 @@ export function NavigationProvider({ children }) {
     setDestinationState(null);
     setRouteOrigin(null);
     setTanks(fullTanks());
+    setFatigue(0);
     setTraveledM(0);
     setElapsedMin(0);
     setFollowing(false);
@@ -533,10 +620,10 @@ export function NavigationProvider({ children }) {
     following, setFollowing, toggleFollow, beginTraverse,
     followSpeed, setFollowSpeed,
     alongPx, progress, idx, alongPoint,
-    traveledM, traveledKm: traveledM / 1000, elapsedMin,
+    traveledM, traveledKm: traveledM / 1000, elapsedMin, fatigue,
     locatePulse, locateAstronaut, routeFitPulse,
-    points: activePoints, stations: activeStations, metrics: activeMetrics,
-    comparisons, instruction, ahead, upcoming, alternate, routeExplain, plss, assessment,
+    points: activePoints, stations: activeStations, metrics: evaMetrics,
+    comparisons, routeRank, instruction, ahead, upcoming, alternate, routeExplain, plss, eva, assessment,
     returnRoute, safeReturn, envelope,
     headingText: headingLabel(geoAstro.heading),
     stick, setStick,
@@ -546,8 +633,8 @@ export function NavigationProvider({ children }) {
     blockedPoints: rerouteOffer?.blocked || [],
     routeAlerts: routed?.alerts || [],
     planetary: !!routed?.planetary,
-    remainingKm: instruction.remainingKm,
-    etaMin: Math.max(0, Math.round(activeMetrics.estimatedTimeMin * (1 - progress)))
+    remainingKm: (forecast.remainingM || 0) / 1000,
+    etaMin: Math.max(0, Math.round(forecast.remainingMin || 0))
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

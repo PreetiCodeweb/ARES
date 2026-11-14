@@ -34,7 +34,7 @@ export function TelemetryProvider({ children }) {
     else if (n.safeReturn.status === 'low') push('warn', 'Return margin low. Compute the habitat route before the next leg.');
   }, [n.safeReturn.status]);
 
-  const hr = n.alongPoint ? Math.round(72 + n.alongPoint.slope * 3.4 + 5 * Math.sin(n.progress * 38)) : 70;
+  const hr = n.eva?.heartRate || (n.alongPoint ? Math.round(72 + n.alongPoint.slope * 2.15 + (n.fatigue || 0) * 0.32) : 70);
 
   const value = useMemo(() => ({
     progress: n.progress,
