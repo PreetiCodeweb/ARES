@@ -109,3 +109,7 @@ cd backend
 source .venv/bin/activate
 pytest -q
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
