@@ -2,7 +2,7 @@
 
 ARES is an adaptive mission decision-support system for Mars EVAs. It combines terrain-aware navigation, hazard analysis, astronaut resource monitoring and dynamic rerouting to help astronauts make safer movement decisions in unpredictable Martian environments.
 
-https://ares-frontend-b6x7.onrender.com/
+https://nasa-hackathon-taupe.vercel.app/
 
 APIS - https://ares-backend-vso9.onrender.com/docs
 
